@@ -251,35 +251,96 @@ def get_unique_cves_for_project(project):
 
 def get_unique_cves_for_branch(branch):
     """
-    Get all unique CVEs for a specific branch
+    Get all unique CVEs for a specific branch with CPE data
     """
     latest_runs = runs.objects.filter(sw_branch_id=branch)
     
-    cve_data = current_sw_state.objects.filter(
+    cve_queryset = current_sw_state.objects.filter(
         last_modified_run_id__in=latest_runs
-    ).select_related('cve_id').values(
-        'cve_id', 'descriptions', 'cvss_score', 'CVSS_Priority',
-        'Analysis_Priority', 'tool_state'
-    ).distinct('cve_id')
+    ).select_related('cve_id').prefetch_related('cpe_string')
     
-    return {item['cve_id']: item for item in cve_data}
+    cve_data = {}
+    for cve_state in cve_queryset:
+        cve_id = cve_state.cve_id
+        if cve_id not in cve_data:
+            # Get CPE information
+            cpe_info = get_cpe_data_for_matrix(cve_state)
+            
+            cve_data[cve_id] = {
+                'cve_id': cve_id,
+                'descriptions': cve_state.descriptions,
+                'cvss_score': cve_state.cvss_score,
+                'CVSS_Priority': cve_state.CVSS_Priority,
+                'Analysis_Priority': cve_state.Analysis_Priority,
+                'tool_state': cve_state.tool_state,
+                'cpe_string': cpe_info.get('cpe_string', ''),
+                'sw_name': cpe_info.get('sw_name', ''),
+                'sw_version': cpe_info.get('sw_version', ''),
+                'architecture': cpe_info.get('architecture', ''),
+            }
+    
+    return cve_data
 
 
 def get_unique_cves_for_component(component):
     """
-    Get all unique CVEs for a specific component
+    Get all unique CVEs for a specific component with CPE data
     """
     releases = e_releases.objects.filter(sw_component=component)
     latest_runs = runs.objects.filter(e_release_id__in=releases)
     
-    cve_data = current_sw_state.objects.filter(
+    cve_queryset = current_sw_state.objects.filter(
         last_modified_run_id__in=latest_runs
-    ).select_related('cve_id').values(
-        'cve_id', 'descriptions', 'cvss_score', 'CVSS_Priority',
-        'Analysis_Priority', 'tool_state'
-    ).distinct('cve_id')
+    ).select_related('cve_id').prefetch_related('cpe_string')
     
-    return {item['cve_id']: item for item in cve_data}
+    cve_data = {}
+    for cve_state in cve_queryset:
+        cve_id = cve_state.cve_id
+        if cve_id not in cve_data:
+            # Get CPE information
+            cpe_info = get_cpe_data_for_matrix(cve_state)
+            
+            cve_data[cve_id] = {
+                'cve_id': cve_id,
+                'descriptions': cve_state.descriptions,
+                'cvss_score': cve_state.cvss_score,
+                'CVSS_Priority': cve_state.CVSS_Priority,
+                'Analysis_Priority': cve_state.Analysis_Priority,
+                'tool_state': cve_state.tool_state,
+                'cpe_string': cpe_info.get('cpe_string', ''),
+                'sw_name': cpe_info.get('sw_name', ''),
+                'sw_version': cpe_info.get('sw_version', ''),
+                'architecture': cpe_info.get('architecture', ''),
+            }
+    
+    return cve_data
+
+
+def get_cpe_data_for_matrix(cve_state):
+    """
+    Get CPE information from sw_bom_entries for matrix reports
+    """
+    try:
+        # Get CPE strings associated with this CVE state
+        cpe_entries = cve_state.cpe_string.all()
+        if cpe_entries.exists():
+            # Take the first CPE entry (or you could aggregate multiple)
+            first_cpe = cpe_entries.first()
+            return {
+                'cpe_string': first_cpe.cpe_string,
+                'sw_name': first_cpe.sw_name,
+                'sw_version': first_cpe.sw_version,
+                'architecture': first_cpe.architecture,
+            }
+    except Exception as e:
+        logger.error(f"Error getting CPE data for matrix: {str(e)}")
+    
+    return {
+        'cpe_string': '',
+        'sw_name': '',
+        'sw_version': '',
+        'architecture': '',
+    }
 
 
 def build_project_matrix(branches_data, all_cves):
