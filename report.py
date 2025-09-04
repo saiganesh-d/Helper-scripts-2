@@ -267,6 +267,230 @@ def build_project_comprehensive_matrix(branches_data, all_cves):
                     base_data.update({
                         f"{col_prefix}_Status": details['status'],
                         f"{col_prefix}_Comments": details['comments'],
+                        f"{col_prefix}_Closed_At": details['closed_at'],
+                        f"{col_prefix}_JIRA_Ticket": details['jira_ticket'],
+                        f"{col_prefix}_JIRA_Status": details['jira_status'],
+                        f"{col_prefix}_STARC_Ticket": details['starc_ticket'],
+                        f"{col_prefix}_STARC_Status": details['starc_status'],
+                        f"{col_prefix}_True_Positive": details['true_positive_reason'],
+                        f"{col_prefix}_False_Positive": details['false_positive_reason'],
+                        f"{col_prefix}_KB_Modified": details['kb_modified'],
+                        f"{col_prefix}_CAVD_No": details['cavd_no'],
+                    })
+            else:
+                # Branch without components - add columns for branch directly
+                col_prefix = branch_name
+                details = get_comprehensive_release_details(cve_id, branch_info['release'])
+                
+                base_data.update({
+                    f"{col_prefix}_Status": details['status'],
+                    f"{col_prefix}_Comments": details['comments'],
+                    f"{col_prefix}_Closed_At": details['closed_at'],
+                    f"{col_prefix}_JIRA_Ticket": details['jira_ticket'],
+                    f"{col_prefix}_JIRA_Status": details['jira_status'],
+                    f"{col_prefix}_STARC_Ticket": details['starc_ticket'],
+                    f"{col_prefix}_STARC_Status": details['starc_status'],
+                    f"{col_prefix}_True_Positive": details['true_positive_reason'],
+                    f"{col_prefix}_False_Positive": details['false_positive_reason'],
+                    f"{col_prefix}_KB_Modified": details['kb_modified'],
+                    f"{col_prefix}_CAVD_No": details['cavd_no'],
+                })
+        
+        cve_list.append(base_data)
+    
+    df = pd.DataFrame(cve_list)
+    logger.info(f"Created comprehensive matrix: {df.shape}")
+    return df
+
+
+def get_comprehensive_release_details(cve_id, release):
+    """
+    Get comprehensive CVE details for a specific release with ALL requested fields
+    """
+    default_response = {
+        'status': 'N/A', 'comments': '', 'closed_at': '', 'jira_ticket': '',
+        'jira_status': '', 'starc_ticket': '', 'starc_status': '',
+        'true_positive_reason': '', 'false_positive_reason': '',
+        'kb_modified': '', 'cavd_no': ''
+    }
+    
+    if not release:
+        return default_response
+    
+    try:
+        # Get the run for this release
+        run_obj = runs.objects.filter(e_release_id=release).first()
+        if not run_obj:
+            return {**default_response, 'status': 'No Run'}
+        
+        # Get CVE state for this run
+        cve_state = current_sw_state.objects.filter(
+            cve_id=cve_id,
+            last_modified_run_id=run_obj
+        ).first()
+        
+        if not cve_state:
+            return {**default_response, 'status': 'Not Found'}
+        
+        # Get comments from current_sw_state_comments
+        comments = current_sw_state_comments.objects.filter(
+            cve_id=cve_state
+        ).values_list('comment', flat=True)
+        comment_str = ' | '.join([c for c in comments if c])
+        
+        # Get JIRA details
+        jira_detail = jira_details.objects.filter(cve_id=cve_state).first()
+        jira_status = jira_detail.jira_status if jira_detail else ''
+        
+        # Format knowledge base modification status
+        kb_modified = ""
+        if cve_state.last_modified_by_knowledgebase == 1:
+            kb_modified = "KB Modified"
+        elif cve_state.last_modified_by_knowledgebase == 2:
+            kb_modified = "System Modified"
+        
+        # Get tool state name
+        status_map = {
+            1: "New", 2: "Open", 3: "Accepted", 4: "Fix Requested",
+            5: "Fixed: Verified", 6: "Fixed: Version Increment",
+            7: "SA: False Positive", 8: "Rejected: False Positive",
+            9: "Rejected: Not Affected", 10: "Not Affected",
+            11: "TBC", 12: "Fixed"
+        }
+        
+        return {
+            'status': status_map.get(cve_state.tool_state, 'Unknown'),
+            'comments': comment_str,
+            'closed_at': cve_state.closed or '',
+            'jira_ticket': cve_state.jira_ticket or '',
+            'jira_status': jira_status,
+            'starc_ticket': cve_state.starc_ticket or '',
+            'starc_status': cve_state.starc_status or '',
+            'true_positive_reason': format_reason(cve_state.true_positive_reason) if cve_state.true_positive_reason else '',
+            'false_positive_reason': format_reason(cve_state.false_positive_reason) if cve_state.false_positive_reason else '',
+            'kb_modified': kb_modified,
+            'cavd_no': cve_state.cavd_no or '',
+        }
+        
+    except Exception as e:
+        logger.error(f"Error getting release details for {cve_id}: {str(e)}")
+        return {**default_response, 'status': 'Error'}
+
+
+def generate_branch_comprehensive_report(request, r_id):
+    """
+    Generate comprehensive branch-level report
+    """
+    try:
+        runs_instance = runs.objects.select_related('sw_branch_id').get(id=r_id)
+        branch = runs_instance.sw_branch_id
+        
+        # Get branch structure
+        branch_data = get_branch_structure_comprehensive(branch)
+        all_cves = get_unique_cves_for_branch_comprehensive(branch)
+        
+        # Build matrix
+        result_df = build_branch_comprehensive_matrix(branch_data, all_cves)
+        
+        file_name = f"{branch.project_id.project_name}_{branch.name}_comprehensive.xlsx"
+        return create_excel_response(result_df, file_name, "Branch Comprehensive Report")
+        
+    except Exception as e:
+        logger.error(f"Error in branch comprehensive report: {str(e)}")
+        return HttpResponse("Error generating branch report", status=500)
+
+
+def get_branch_structure_comprehensive(branch):
+    """
+    Get branch structure for comprehensive reporting
+    """
+    components = sw_components.objects.filter(sw_branch=branch)
+    
+    if components.exists():
+        # Branch has components
+        structure = {'type': 'components', 'data': {}}
+        for component in components:
+            latest_release = e_releases.objects.filter(
+                sw_component=component, latest=True
+            ).first()
+            if latest_release:
+                structure['data'][component.component_name] = latest_release
+    else:
+        # Branch has direct releases
+        releases = e_releases.objects.filter(
+            sw_branch_id=branch, sw_component__isnull=True
+        ).order_by('-creation_date')
+        structure = {'type': 'releases', 'data': {}}
+        for release in releases:
+            structure['data'][release.e_release_version] = release
+    
+    return structure
+
+
+def get_unique_cves_for_branch_comprehensive(branch):
+    """
+    Get unique CVEs for branch with comprehensive data
+    """
+    try:
+        branch_runs = runs.objects.filter(sw_branch_id=branch)
+        cve_states = current_sw_state.objects.filter(
+            last_modified_run_id__in=branch_runs
+        ).select_related('cve_id').prefetch_related('cpe_string')
+        
+        cve_data = {}
+        for cve_state in cve_states:
+            cve_id = cve_state.cve_id
+            if cve_id not in cve_data:
+                cpe_info = get_comprehensive_cpe_data(cve_state)
+                attack_vector = get_attack_vector_for_cve(cve_id)
+                
+                cve_data[cve_id] = {
+                    'cve_id': cve_id,
+                    'descriptions': cve_state.descriptions or '',
+                    'cvss_score': cve_state.cvss_score or '',
+                    'CVSS_Priority': cve_state.CVSS_Priority or '',
+                    'Analysis_Priority': cve_state.Analysis_Priority or '',
+                    'attack_vector': attack_vector,
+                    'cpe_string': cpe_info.get('cpe_string', ''),
+                    'sw_name': cpe_info.get('sw_name', ''),
+                    'sw_version': cpe_info.get('sw_version', ''),
+                    'architecture': cpe_info.get('architecture', ''),
+                }
+        
+        return cve_data
+        
+    except Exception as e:
+        logger.error(f"Error getting branch CVEs: {str(e)}")
+        return {}
+
+
+def build_branch_comprehensive_matrix(branch_data, all_cves):
+    """
+    Build comprehensive branch matrix
+    """
+    cve_list = []
+    for cve_id, cve_data in all_cves.items():
+        base_data = {
+            'CVE ID': cve_id,
+            'Description': cve_data['descriptions'],
+            'CPE String': cve_data['cpe_string'],
+            'SW Name': cve_data['sw_name'],
+            'SW Version': cve_data['sw_version'],
+            'Architecture': cve_data['architecture'],
+            'CVSS Score': cve_data['cvss_score'],
+            'CVSS Priority': cve_data['CVSS_Priority'],
+            'Analysis Priority': cve_data['Analysis_Priority'],
+            'Attack Vector': cve_data['attack_vector'],
+        }
+        
+        # Add comprehensive columns for each component/release
+        for name, release in branch_data['data'].items():
+            details = get_comprehensive_release_details(cve_id, release)
+            col_prefix = name
+            
+            base_data.update({
+                f"{col_prefix}_Status": details['status'],
+                f"{col_prefix}_Comments": details['comments'],
                 f"{col_prefix}_Closed_At": details['closed_at'],
                 f"{col_prefix}_JIRA_Ticket": details['jira_ticket'],
                 f"{col_prefix}_JIRA_Status": details['jira_status'],
@@ -282,8 +506,6 @@ def build_project_comprehensive_matrix(branches_data, all_cves):
     
     return pd.DataFrame(cve_list)
 
-
-# Component Level Reports
 
 def generate_component_comprehensive_report(request, r_id):
     """
@@ -393,7 +615,299 @@ def build_component_comprehensive_matrix(releases, all_cves):
     return pd.DataFrame(cve_list)
 
 
-# Release Level Report (Enhanced)
+# ALTERNATIVE MULTI-SHEET APPROACH
+
+def generate_project_alternative_report(request, r_id):
+    """
+    Generate clean multi-sheet project report (Alternative Approach)
+    """
+    try:
+        runs_instance = runs.objects.select_related('sw_branch_id__project_id').get(id=r_id)
+        project = runs_instance.sw_branch_id.project_id
+        
+        logger.info(f"Generating alternative project report for: {project.project_name}")
+        
+        # Get data
+        branches_data = get_project_structure_comprehensive(project)
+        all_cves = get_unique_cves_for_project_comprehensive(project)
+        
+        # Create multiple sheets
+        sheets_data = create_alternative_project_sheets(branches_data, all_cves)
+        
+        file_name = f"{project.project_name}_alternative_report.xlsx"
+        return create_multi_sheet_excel_response(sheets_data, file_name)
+        
+    except Exception as e:
+        logger.error(f"Error in alternative project report: {str(e)}")
+        return HttpResponse("Error generating alternative project report", status=500)
+
+
+def create_alternative_project_sheets(branches_data, all_cves):
+    """
+    Create multiple sheets for alternative format
+    """
+    sheets = {}
+    
+    # Sheet 1: Summary Matrix (CVE + Simple Status)
+    summary_data = []
+    for cve_id, cve_data in all_cves.items():
+        row = {
+            'CVE ID': cve_id,
+            'Description': cve_data['descriptions'],
+            'CPE String': cve_data['cpe_string'],
+            'SW Name': cve_data['sw_name'],
+            'CVSS Score': cve_data['cvss_score'],
+            'CVSS Priority': cve_data['CVSS_Priority'],
+            'Attack Vector': cve_data['attack_vector'],
+        }
+        
+        # Simple status for each branch/component
+        for branch_name, branch_info in branches_data.items():
+            if branch_info['type'] == 'branch_with_components':
+                for comp_name, release in branch_info['components'].items():
+                    col_name = f"{branch_name}_{comp_name}_Status"
+                    details = get_comprehensive_release_details(cve_id, release)
+                    row[col_name] = details['status']
+            else:
+                details = get_comprehensive_release_details(cve_id, branch_info['release'])
+                row[f"{branch_name}_Status"] = details['status']
+        
+        summary_data.append(row)
+    
+    sheets['Summary'] = pd.DataFrame(summary_data)
+    
+    # Sheet 2: Detailed View (Vertical Format)
+    detailed_data = []
+    for cve_id, cve_data in all_cves.items():
+        for branch_name, branch_info in branches_data.items():
+            if branch_info['type'] == 'branch_with_components':
+                for comp_name, release in branch_info['components'].items():
+                    details = get_comprehensive_release_details(cve_id, release)
+                    detailed_data.append({
+                        'CVE ID': cve_id,
+                        'Branch': branch_name,
+                        'Component': comp_name,
+                        'Release': release.e_release_version if release else '',
+                        'Status': details['status'],
+                        'CVSS Score': cve_data['cvss_score'],
+                        'Priority': cve_data['CVSS_Priority'],
+                        'Comments': details['comments'],
+                        'JIRA Ticket': details['jira_ticket'],
+                        'STARC Ticket': details['starc_ticket'],
+                        'Closed At': details['closed_at'],
+                        'True Positive': details['true_positive_reason'],
+                        'False Positive': details['false_positive_reason'],
+                        'KB Modified': details['kb_modified'],
+                        'CAVD No': details['cavd_no'],
+                    })
+            else:
+                details = get_comprehensive_release_details(cve_id, branch_info['release'])
+                detailed_data.append({
+                    'CVE ID': cve_id,
+                    'Branch': branch_name,
+                    'Component': '',
+                    'Release': branch_info['release'].e_release_version if branch_info['release'] else '',
+                    'Status': details['status'],
+                    'CVSS Score': cve_data['cvss_score'],
+                    'Priority': cve_data['CVSS_Priority'],
+                    'Comments': details['comments'],
+                    'JIRA Ticket': details['jira_ticket'],
+                    'STARC Ticket': details['starc_ticket'],
+                    'Closed At': details['closed_at'],
+                    'True Positive': details['true_positive_reason'],
+                    'False Positive': details['false_positive_reason'],
+                    'KB Modified': details['kb_modified'],
+                    'CAVD No': details['cavd_no'],
+                })
+    
+    sheets['Details'] = pd.DataFrame(detailed_data)
+    
+    # Sheet 3+: Per-Branch Analysis
+    for branch_name, branch_info in branches_data.items():
+        branch_data = []
+        for cve_id, cve_data in all_cves.items():
+            if branch_info['type'] == 'branch_with_components':
+                for comp_name, release in branch_info['components'].items():
+                    details = get_comprehensive_release_details(cve_id, release)
+                    if details['status'] not in ['N/A', 'Not Found']:
+                        branch_data.append({
+                            'CVE ID': cve_id,
+                            'Component': comp_name,
+                            'Description': cve_data['descriptions'],
+                            'Status': details['status'],
+                            'CVSS Score': cve_data['cvss_score'],
+                            'Comments': details['comments'],
+                            'JIRA Ticket': details['jira_ticket'],
+                            'Closed At': details['closed_at'],
+                        })
+            else:
+                details = get_comprehensive_release_details(cve_id, branch_info['release'])
+                if details['status'] not in ['N/A', 'Not Found']:
+                    branch_data.append({
+                        'CVE ID': cve_id,
+                        'Component': 'Direct Release',
+                        'Description': cve_data['descriptions'],
+                        'Status': details['status'],
+                        'CVSS Score': cve_data['cvss_score'],
+                        'Comments': details['comments'],
+                        'JIRA Ticket': details['jira_ticket'],
+                        'Closed At': details['closed_at'],
+                    })
+        
+        if branch_data:
+            sheets[f'Branch_{branch_name}'] = pd.DataFrame(branch_data)
+    
+    return sheets
+
+
+def generate_branch_alternative_report(request, r_id):
+    """
+    Generate alternative branch-level report
+    """
+    try:
+        runs_instance = runs.objects.select_related('sw_branch_id').get(id=r_id)
+        branch = runs_instance.sw_branch_id
+        
+        branch_data = get_branch_structure_comprehensive(branch)
+        all_cves = get_unique_cves_for_branch_comprehensive(branch)
+        
+        sheets_data = create_alternative_branch_sheets(branch_data, all_cves, branch.name)
+        
+        file_name = f"{branch.project_id.project_name}_{branch.name}_alternative.xlsx"
+        return create_multi_sheet_excel_response(sheets_data, file_name)
+        
+    except Exception as e:
+        logger.error(f"Error in alternative branch report: {str(e)}")
+        return HttpResponse("Error generating alternative branch report", status=500)
+
+
+def create_alternative_branch_sheets(branch_data, all_cves, branch_name):
+    """
+    Create alternative branch sheets
+    """
+    sheets = {}
+    
+    # Summary sheet
+    summary_data = []
+    for cve_id, cve_data in all_cves.items():
+        row = {
+            'CVE ID': cve_id,
+            'Description': cve_data['descriptions'],
+            'CPE String': cve_data['cpe_string'],
+            'SW Name': cve_data['sw_name'],
+            'CVSS Score': cve_data['cvss_score'],
+            'Attack Vector': cve_data['attack_vector'],
+        }
+        
+        for name, release in branch_data['data'].items():
+            details = get_comprehensive_release_details(cve_id, release)
+            row[f"{name}_Status"] = details['status']
+        
+        summary_data.append(row)
+    
+    sheets['Summary'] = pd.DataFrame(summary_data)
+    
+    # Detailed sheet
+    detailed_data = []
+    for cve_id, cve_data in all_cves.items():
+        for name, release in branch_data['data'].items():
+            details = get_comprehensive_release_details(cve_id, release)
+            detailed_data.append({
+                'CVE ID': cve_id,
+                'Component/Release': name,
+                'Status': details['status'],
+                'Description': cve_data['descriptions'],
+                'CVSS Score': cve_data['cvss_score'],
+                'Comments': details['comments'],
+                'JIRA Ticket': details['jira_ticket'],
+                'STARC Ticket': details['starc_ticket'],
+                'Closed At': details['closed_at'],
+                'KB Modified': details['kb_modified'],
+                'CAVD No': details['cavd_no'],
+            })
+    
+    sheets['Details'] = pd.DataFrame(detailed_data)
+    
+    return sheets
+
+
+def generate_component_alternative_report(request, r_id):
+    """
+    Generate alternative component-level report
+    """
+    try:
+        component_id = request.GET.get("component_id", r_id)
+        component = sw_components.objects.select_related('sw_branch__project_id').get(id=component_id)
+        
+        releases = e_releases.objects.filter(sw_component=component).order_by('-creation_date')
+        all_cves = get_unique_cves_for_component_comprehensive(component)
+        
+        sheets_data = create_alternative_component_sheets(releases, all_cves, component.component_name)
+        
+        project_name = component.sw_branch.project_id.project_name
+        branch_name = component.sw_branch.name
+        file_name = f"{project_name}_{branch_name}_{component.component_name}_alternative.xlsx"
+        
+        return create_multi_sheet_excel_response(sheets_data, file_name)
+        
+    except Exception as e:
+        logger.error(f"Error in alternative component report: {str(e)}")
+        return HttpResponse("Error generating alternative component report", status=500)
+
+
+def create_alternative_component_sheets(releases, all_cves, component_name):
+    """
+    Create alternative component sheets
+    """
+    sheets = {}
+    
+    # Summary sheet
+    summary_data = []
+    for cve_id, cve_data in all_cves.items():
+        row = {
+            'CVE ID': cve_id,
+            'Description': cve_data['descriptions'],
+            'CPE String': cve_data['cpe_string'],
+            'SW Name': cve_data['sw_name'],
+            'CVSS Score': cve_data['cvss_score'],
+            'Attack Vector': cve_data['attack_vector'],
+        }
+        
+        for release in releases:
+            details = get_comprehensive_release_details(cve_id, release)
+            row[f"{release.e_release_version}_Status"] = details['status']
+        
+        summary_data.append(row)
+    
+    sheets['Summary'] = pd.DataFrame(summary_data)
+    
+    # Detailed sheet
+    detailed_data = []
+    for cve_id, cve_data in all_cves.items():
+        for release in releases:
+            details = get_comprehensive_release_details(cve_id, release)
+            detailed_data.append({
+                'CVE ID': cve_id,
+                'Release': release.e_release_version,
+                'Status': details['status'],
+                'Description': cve_data['descriptions'],
+                'CVSS Score': cve_data['cvss_score'],
+                'Comments': details['comments'],
+                'JIRA Ticket': details['jira_ticket'],
+                'STARC Ticket': details['starc_ticket'],
+                'Closed At': details['closed_at'],
+                'True Positive': details['true_positive_reason'],
+                'False Positive': details['false_positive_reason'],
+                'KB Modified': details['kb_modified'],
+                'CAVD No': details['cavd_no'],
+            })
+    
+    sheets['Details'] = pd.DataFrame(detailed_data)
+    
+    return sheets
+
+
+# RELEASE LEVEL REPORT
 
 def generate_release_level_report(request, r_id):
     """
@@ -540,6 +1054,27 @@ def process_enhanced_cve_data(cve_state):
         return None
 
 
+# UTILITY FUNCTIONS
+
+def format_reason(reason):
+    """
+    Format true/false positive reasons
+    """
+    if not reason:
+        return ""
+    
+    try:
+        parts = reason.split(" ")
+        if len(parts) >= 2:
+            config_status = "set" if "true" in reason.lower() else "not set"
+            return f"This CVE is about {parts[0]} and its related Config Name is {parts[1]} which is {config_status} according to config file"
+        else:
+            presence = "present" if "true" in reason.lower() else "not present"
+            return f"This CVE is about {parts[0]} {presence} in the compile log"
+    except Exception:
+        return reason
+
+
 def get_all_cvss_versions(cve_id):
     """
     Get CVSS data for all versions efficiently
@@ -578,7 +1113,7 @@ def get_tool_state_name(tool_state):
     return status_map.get(tool_state, "Unknown")
 
 
-# Enhanced Filtering with Error Handling
+# ENHANCED FILTERING
 
 def enhanced_report_filter(cve_dict, current_sw_state_instance):
     """
@@ -594,33 +1129,28 @@ def enhanced_report_filter(cve_dict, current_sw_state_instance):
         created_date = cve_dict.get("created_at", "")
         checked_cves = cve_dict.get("checked_cves", "")
         
-        # Apply CVE ID filter
+        # Apply filters
         if cve_search:
             current_sw_state_instance = apply_enhanced_cve_filter(current_sw_state_instance, cve_search)
         
-        # Apply severity filter
         if severity_search:
             current_sw_state_instance = apply_enhanced_severity_filter(current_sw_state_instance, severity_search)
         
-        # Apply tool status filter
         if tool_status_search:
             tool_status_list = [int(x.strip()) for x in tool_status_search.split(",") if x.strip().isdigit()]
             if tool_status_list:
                 current_sw_state_instance = current_sw_state_instance.filter(tool_state__in=tool_status_list)
         
-        # Apply version filter
         if version_search:
             current_sw_state_instance = current_sw_state_instance.filter(
                 first_detected_at__e_release_version__icontains=version_search
             )
         
-        # Apply fixed-in filter
         if fixedin_search and len(fixedin_search) > 1:
             current_sw_state_instance = current_sw_state_instance.filter(
                 closed__icontains=fixedin_search
             )
         
-        # Apply date filter
         if created_date:
             try:
                 target_date = datetime.datetime.strptime(created_date, "%Y-%m-%d")
@@ -632,7 +1162,6 @@ def enhanced_report_filter(cve_dict, current_sw_state_instance):
             except ValueError:
                 logger.warning(f"Invalid date format: {created_date}")
         
-        # Apply CVE list filter
         if checked_cves:
             cve_list = [x.strip() for x in checked_cves.split(",") if x.strip()]
             if cve_list:
@@ -710,7 +1239,7 @@ def apply_enhanced_severity_filter(queryset, severity_search):
         return queryset
 
 
-# Utility Functions
+# EXCEL CREATION FUNCTIONS
 
 def create_excel_response(df, file_name, sheet_name="Report"):
     """
@@ -738,7 +1267,7 @@ def create_excel_response(df, file_name, sheet_name="Report"):
                             max_length = len(str(cell.value))
                     except:
                         pass
-                adjusted_width = min(max_length + 2, 80)  # Increased max width
+                adjusted_width = min(max_length + 2, 80)
                 worksheet.column_dimensions[column_letter].width = adjusted_width
             
             # Freeze header row
@@ -762,297 +1291,6 @@ def create_excel_response(df, file_name, sheet_name="Report"):
     except Exception as e:
         logger.error(f"Error creating Excel response: {str(e)}")
         return HttpResponse("Error creating Excel file", status=500)
-
-
-# Performance Monitoring
-
-def log_performance_metrics(func_name, start_time, record_count=0):
-    """
-    Log performance metrics for monitoring
-    """
-    import time
-    end_time = time.time()
-    duration = end_time - start_time
-    
-    logger.info(f"Performance: {func_name} completed in {duration:.2f}s for {record_count} records")
-    
-    if duration > 30:
-        logger.warning(f"Slow operation: {func_name} took {duration:.2f}s - consider optimization")
-    
-    return duration
-                        f"{col_prefix}_Closed_At": details['closed_at'],
-                        f"{col_prefix}_JIRA_Ticket": details['jira_ticket'],
-                        f"{col_prefix}_JIRA_Status": details['jira_status'],
-                        f"{col_prefix}_STARC_Ticket": details['starc_ticket'],
-                        f"{col_prefix}_STARC_Status": details['starc_status'],
-                        f"{col_prefix}_True_Positive": details['true_positive_reason'],
-                        f"{col_prefix}_False_Positive": details['false_positive_reason'],
-                        f"{col_prefix}_KB_Modified": details['kb_modified'],
-                        f"{col_prefix}_CAVD_No": details['cavd_no'],
-                    })
-            else:
-                # Branch without components - add columns for branch directly
-                col_prefix = branch_name
-                details = get_comprehensive_release_details(cve_id, branch_info['release'])
-                
-                base_data.update({
-                    f"{col_prefix}_Status": details['status'],
-                    f"{col_prefix}_Comments": details['comments'],
-                    f"{col_prefix}_Closed_At": details['closed_at'],
-                    f"{col_prefix}_JIRA_Ticket": details['jira_ticket'],
-                    f"{col_prefix}_JIRA_Status": details['jira_status'],
-                    f"{col_prefix}_STARC_Ticket": details['starc_ticket'],
-                    f"{col_prefix}_STARC_Status": details['starc_status'],
-                    f"{col_prefix}_True_Positive": details['true_positive_reason'],
-                    f"{col_prefix}_False_Positive": details['false_positive_reason'],
-                    f"{col_prefix}_KB_Modified": details['kb_modified'],
-                    f"{col_prefix}_CAVD_No": details['cavd_no'],
-                })
-        
-        cve_list.append(base_data)
-    
-    df = pd.DataFrame(cve_list)
-    logger.info(f"Created comprehensive matrix: {df.shape}")
-    logger.info(f"Columns: {list(df.columns)[:20]}...")  # Show first 20 columns
-    return df
-
-
-def get_comprehensive_release_details(cve_id, release):
-    """
-    Get comprehensive CVE details for a specific release with ALL requested fields
-    """
-    default_response = {
-        'status': 'N/A', 'comments': '', 'closed_at': '', 'jira_ticket': '',
-        'jira_status': '', 'starc_ticket': '', 'starc_status': '',
-        'true_positive_reason': '', 'false_positive_reason': '',
-        'kb_modified': '', 'cavd_no': ''
-    }
-    
-    if not release:
-        return default_response
-    
-    try:
-        # Get the run for this release
-        run_obj = runs.objects.filter(e_release_id=release).first()
-        if not run_obj:
-            return {**default_response, 'status': 'No Run'}
-        
-        # Get CVE state for this run
-        cve_state = current_sw_state.objects.filter(
-            cve_id=cve_id,
-            last_modified_run_id=run_obj
-        ).first()
-        
-        if not cve_state:
-            return {**default_response, 'status': 'Not Found'}
-        
-        # Get comments from current_sw_state_comments
-        comments = current_sw_state_comments.objects.filter(
-            cve_id=cve_state
-        ).values_list('comment', flat=True)
-        comment_str = ' | '.join([c for c in comments if c])
-        
-        # Get JIRA details
-        jira_detail = jira_details.objects.filter(cve_id=cve_state).first()
-        jira_status = jira_detail.jira_status if jira_detail else ''
-        
-        # Format knowledge base modification status
-        kb_modified = ""
-        if cve_state.last_modified_by_knowledgebase == 1:
-            kb_modified = "KB Modified"
-        elif cve_state.last_modified_by_knowledgebase == 2:
-            kb_modified = "System Modified"
-        
-        # Get tool state name
-        status_map = {
-            1: "New", 2: "Open", 3: "Accepted", 4: "Fix Requested",
-            5: "Fixed: Verified", 6: "Fixed: Version Increment",
-            7: "SA: False Positive", 8: "Rejected: False Positive",
-            9: "Rejected: Not Affected", 10: "Not Affected",
-            11: "TBC", 12: "Fixed"
-        }
-        
-        return {
-            'status': status_map.get(cve_state.tool_state, 'Unknown'),
-            'comments': comment_str,
-            'closed_at': cve_state.closed or '',
-            'jira_ticket': cve_state.jira_ticket or '',
-            'jira_status': jira_status,
-            'starc_ticket': cve_state.starc_ticket or '',
-            'starc_status': cve_state.starc_status or '',
-            'true_positive_reason': format_reason(cve_state.true_positive_reason) if cve_state.true_positive_reason else '',
-            'false_positive_reason': format_reason(cve_state.false_positive_reason) if cve_state.false_positive_reason else '',
-            'kb_modified': kb_modified,
-            'cavd_no': cve_state.cavd_no or '',
-        }
-        
-    except Exception as e:
-        logger.error(f"Error getting release details for {cve_id}: {str(e)}")
-        return {**default_response, 'status': 'Error'}
-
-
-def format_reason(reason):
-    """
-    Format true/false positive reasons
-    """
-    if not reason:
-        return ""
-    
-    try:
-        parts = reason.split(" ")
-        if len(parts) >= 2:
-            config_status = "set" if "true" in reason.lower() else "not set"
-            return f"This CVE is about {parts[0]} and its related Config Name is {parts[1]} which is {config_status} according to config file"
-        else:
-            presence = "present" if "true" in reason.lower() else "not present"
-            return f"This CVE is about {parts[0]} {presence} in the compile log"
-    except Exception:
-        return reason
-
-
-# ALTERNATIVE MULTI-SHEET APPROACH (Cleaner Solution)
-
-def generate_project_alternative_report(request, r_id):
-    """
-    Generate clean multi-sheet project report (Alternative Approach)
-    """
-    try:
-        runs_instance = runs.objects.select_related('sw_branch_id__project_id').get(id=r_id)
-        project = runs_instance.sw_branch_id.project_id
-        
-        logger.info(f"Generating alternative project report for: {project.project_name}")
-        
-        # Get data
-        branches_data = get_project_structure_comprehensive(project)
-        all_cves = get_unique_cves_for_project_comprehensive(project)
-        
-        # Create multiple sheets
-        sheets_data = create_alternative_project_sheets(branches_data, all_cves)
-        
-        file_name = f"{project.project_name}_alternative_report.xlsx"
-        return create_multi_sheet_excel_response(sheets_data, file_name)
-        
-    except Exception as e:
-        logger.error(f"Error in alternative project report: {str(e)}")
-        return HttpResponse("Error generating alternative project report", status=500)
-
-
-def create_alternative_project_sheets(branches_data, all_cves):
-    """
-    Create multiple sheets for alternative format
-    """
-    sheets = {}
-    
-    # Sheet 1: Summary Matrix (CVE + Simple Status)
-    summary_data = []
-    for cve_id, cve_data in all_cves.items():
-        row = {
-            'CVE ID': cve_id,
-            'Description': cve_data['descriptions'],
-            'CPE String': cve_data['cpe_string'],
-            'SW Name': cve_data['sw_name'],
-            'CVSS Score': cve_data['cvss_score'],
-            'CVSS Priority': cve_data['CVSS_Priority'],
-            'Attack Vector': cve_data['attack_vector'],
-        }
-        
-        # Simple status for each branch/component
-        for branch_name, branch_info in branches_data.items():
-            if branch_info['type'] == 'branch_with_components':
-                for comp_name, release in branch_info['components'].items():
-                    col_name = f"{branch_name}_{comp_name}_Status"
-                    details = get_comprehensive_release_details(cve_id, release)
-                    row[col_name] = details['status']
-            else:
-                details = get_comprehensive_release_details(cve_id, branch_info['release'])
-                row[f"{branch_name}_Status"] = details['status']
-        
-        summary_data.append(row)
-    
-    sheets['Summary'] = pd.DataFrame(summary_data)
-    
-    # Sheet 2: Detailed View (Vertical Format)
-    detailed_data = []
-    for cve_id, cve_data in all_cves.items():
-        for branch_name, branch_info in branches_data.items():
-            if branch_info['type'] == 'branch_with_components':
-                for comp_name, release in branch_info['components'].items():
-                    details = get_comprehensive_release_details(cve_id, release)
-                    detailed_data.append({
-                        'CVE ID': cve_id,
-                        'Branch': branch_name,
-                        'Component': comp_name,
-                        'Release': release.e_release_version if release else '',
-                        'Status': details['status'],
-                        'CVSS Score': cve_data['cvss_score'],
-                        'Priority': cve_data['CVSS_Priority'],
-                        'Comments': details['comments'],
-                        'JIRA Ticket': details['jira_ticket'],
-                        'STARC Ticket': details['starc_ticket'],
-                        'Closed At': details['closed_at'],
-                        'True Positive': details['true_positive_reason'],
-                        'False Positive': details['false_positive_reason'],
-                        'KB Modified': details['kb_modified'],
-                        'CAVD No': details['cavd_no'],
-                    })
-            else:
-                details = get_comprehensive_release_details(cve_id, branch_info['release'])
-                detailed_data.append({
-                    'CVE ID': cve_id,
-                    'Branch': branch_name,
-                    'Component': '',
-                    'Release': branch_info['release'].e_release_version if branch_info['release'] else '',
-                    'Status': details['status'],
-                    'CVSS Score': cve_data['cvss_score'],
-                    'Priority': cve_data['CVSS_Priority'],
-                    'Comments': details['comments'],
-                    'JIRA Ticket': details['jira_ticket'],
-                    'STARC Ticket': details['starc_ticket'],
-                    'Closed At': details['closed_at'],
-                    'True Positive': details['true_positive_reason'],
-                    'False Positive': details['false_positive_reason'],
-                    'KB Modified': details['kb_modified'],
-                    'CAVD No': details['cavd_no'],
-                })
-    
-    sheets['Details'] = pd.DataFrame(detailed_data)
-    
-    # Sheet 3+: Per-Branch Analysis
-    for branch_name, branch_info in branches_data.items():
-        branch_data = []
-        for cve_id, cve_data in all_cves.items():
-            if branch_info['type'] == 'branch_with_components':
-                for comp_name, release in branch_info['components'].items():
-                    details = get_comprehensive_release_details(cve_id, release)
-                    if details['status'] not in ['N/A', 'Not Found']:
-                        branch_data.append({
-                            'CVE ID': cve_id,
-                            'Component': comp_name,
-                            'Description': cve_data['descriptions'],
-                            'Status': details['status'],
-                            'CVSS Score': cve_data['cvss_score'],
-                            'Comments': details['comments'],
-                            'JIRA Ticket': details['jira_ticket'],
-                            'Closed At': details['closed_at'],
-                        })
-            else:
-                details = get_comprehensive_release_details(cve_id, branch_info['release'])
-                if details['status'] not in ['N/A', 'Not Found']:
-                    branch_data.append({
-                        'CVE ID': cve_id,
-                        'Component': 'Direct Release',
-                        'Description': cve_data['descriptions'],
-                        'Status': details['status'],
-                        'CVSS Score': cve_data['cvss_score'],
-                        'Comments': details['comments'],
-                        'JIRA Ticket': details['jira_ticket'],
-                        'Closed At': details['closed_at'],
-                    })
-        
-        if branch_data:
-            sheets[f'Branch_{branch_name}'] = pd.DataFrame(branch_data)
-    
-    return sheets
 
 
 def create_multi_sheet_excel_response(sheets_data, file_name):
@@ -1083,6 +1321,11 @@ def create_multi_sheet_excel_response(sheets_data, file_name):
                             pass
                     adjusted_width = min(max_length + 2, 50)
                     worksheet.column_dimensions[column_letter].width = adjusted_width
+                
+                # Freeze header and add filters
+                worksheet.freeze_panes = 'A2'
+                if df.shape[0] > 0:
+                    worksheet.auto_filter.ref = f"A1:{chr(64 + df.shape[1])}{df.shape[0] + 1}"
         
         output.seek(0)
         
@@ -1098,121 +1341,3 @@ def create_multi_sheet_excel_response(sheets_data, file_name):
     except Exception as e:
         logger.error(f"Error creating multi-sheet Excel: {str(e)}")
         return HttpResponse("Error creating Excel file", status=500)
-
-
-# Branch and Component Level Reports (Both Approaches)
-
-def generate_branch_comprehensive_report(request, r_id):
-    """
-    Generate comprehensive branch-level report
-    """
-    try:
-        runs_instance = runs.objects.select_related('sw_branch_id').get(id=r_id)
-        branch = runs_instance.sw_branch_id
-        
-        # Get branch structure
-        branch_data = get_branch_structure_comprehensive(branch)
-        all_cves = get_unique_cves_for_branch_comprehensive(branch)
-        
-        # Build matrix
-        result_df = build_branch_comprehensive_matrix(branch_data, all_cves)
-        
-        file_name = f"{branch.project_id.project_name}_{branch.name}_comprehensive.xlsx"
-        return create_excel_response(result_df, file_name, "Branch Comprehensive Report")
-        
-    except Exception as e:
-        logger.error(f"Error in branch comprehensive report: {str(e)}")
-        return HttpResponse("Error generating branch report", status=500)
-
-
-def get_branch_structure_comprehensive(branch):
-    """
-    Get branch structure for comprehensive reporting
-    """
-    components = sw_components.objects.filter(sw_branch=branch)
-    
-    if components.exists():
-        # Branch has components
-        structure = {'type': 'components', 'data': {}}
-        for component in components:
-            latest_release = e_releases.objects.filter(
-                sw_component=component, latest=True
-            ).first()
-            if latest_release:
-                structure['data'][component.component_name] = latest_release
-    else:
-        # Branch has direct releases
-        releases = e_releases.objects.filter(
-            sw_branch_id=branch, sw_component__isnull=True
-        ).order_by('-creation_date')
-        structure = {'type': 'releases', 'data': {}}
-        for release in releases:
-            structure['data'][release.e_release_version] = release
-    
-    return structure
-
-
-def get_unique_cves_for_branch_comprehensive(branch):
-    """
-    Get unique CVEs for branch with comprehensive data
-    """
-    try:
-        branch_runs = runs.objects.filter(sw_branch_id=branch)
-        cve_states = current_sw_state.objects.filter(
-            last_modified_run_id__in=branch_runs
-        ).select_related('cve_id').prefetch_related('cpe_string')
-        
-        cve_data = {}
-        for cve_state in cve_states:
-            cve_id = cve_state.cve_id
-            if cve_id not in cve_data:
-                cpe_info = get_comprehensive_cpe_data(cve_state)
-                attack_vector = get_attack_vector_for_cve(cve_id)
-                
-                cve_data[cve_id] = {
-                    'cve_id': cve_id,
-                    'descriptions': cve_state.descriptions or '',
-                    'cvss_score': cve_state.cvss_score or '',
-                    'CVSS_Priority': cve_state.CVSS_Priority or '',
-                    'Analysis_Priority': cve_state.Analysis_Priority or '',
-                    'attack_vector': attack_vector,
-                    'cpe_string': cpe_info.get('cpe_string', ''),
-                    'sw_name': cpe_info.get('sw_name', ''),
-                    'sw_version': cpe_info.get('sw_version', ''),
-                    'architecture': cpe_info.get('architecture', ''),
-                }
-        
-        return cve_data
-        
-    except Exception as e:
-        logger.error(f"Error getting branch CVEs: {str(e)}")
-        return {}
-
-
-def build_branch_comprehensive_matrix(branch_data, all_cves):
-    """
-    Build comprehensive branch matrix
-    """
-    cve_list = []
-    for cve_id, cve_data in all_cves.items():
-        base_data = {
-            'CVE ID': cve_id,
-            'Description': cve_data['descriptions'],
-            'CPE String': cve_data['cpe_string'],
-            'SW Name': cve_data['sw_name'],
-            'SW Version': cve_data['sw_version'],
-            'Architecture': cve_data['architecture'],
-            'CVSS Score': cve_data['cvss_score'],
-            'CVSS Priority': cve_data['CVSS_Priority'],
-            'Analysis Priority': cve_data['Analysis_Priority'],
-            'Attack Vector': cve_data['attack_vector'],
-        }
-        
-        # Add comprehensive columns for each component/release
-        for name, release in branch_data['data'].items():
-            details = get_comprehensive_release_details(cve_id, release)
-            col_prefix = name
-            
-            base_data.update({
-                f"{col_prefix}_Status": details['status'],
-                f"{col_prefix}_Comments": details['comments'],
