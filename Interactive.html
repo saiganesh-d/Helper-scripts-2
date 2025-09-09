@@ -1,0 +1,278 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>CVE Analytics Demo</title>
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+    <script type="text/javascript" src="https://www.gstatic.com/charts/loader.js"></script>
+    <style>
+        .bg-gradient-primary {
+            background: linear-gradient(135deg, #007bff 0%, #0056b3 100%);
+        }
+        
+        .tool-status-btn {
+            transition: all 0.3s ease;
+            border-radius: 8px;
+            position: relative;
+            overflow: hidden;
+        }
+        
+        .tool-status-btn:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 4px 12px rgba(0,0,0,0.15);
+        }
+        
+        .tool-status-btn.active {
+            background: linear-gradient(135deg, #007bff 0%, #0056b3 100%);
+            color: white;
+            border-color: #007bff;
+            box-shadow: 0 4px 12px rgba(0,123,255,0.3);
+        }
+        
+        .tool-status-btn.active .badge {
+            background-color: rgba(255,255,255,0.2) !important;
+        }
+        
+        .loading-overlay {
+            position: absolute;
+            top: 0;
+            left: 0;
+            right: 0;
+            bottom: 0;
+            background: rgba(255,255,255,0.9);
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            border-radius: 8px;
+            z-index: 100;
+        }
+        
+        .card {
+            border: none;
+            border-radius: 12px;
+        }
+        
+        .card-header {
+            border-radius: 12px 12px 0 0 !important;
+        }
+        
+        #priority-stats .col > div {
+            transition: transform 0.2s ease, box-shadow 0.2s ease;
+        }
+        
+        #priority-stats .col > div:hover {
+            transform: translateY(-3px);
+            box-shadow: 0 8px 20px rgba(0,0,0,0.1);
+        }
+        
+        @keyframes countUp {
+            from { transform: scale(0.8); opacity: 0; }
+            to { transform: scale(1); opacity: 1; }
+        }
+        
+        .stat-update {
+            animation: countUp 0.5s ease-out;
+        }
+        
+        .progress {
+            border-radius: 10px;
+        }
+        
+        .progress-bar {
+            border-radius: 10px;
+            transition: width 0.8s ease;
+        }
+    </style>
+</head>
+<body class="bg-light">
+    <div class="container-fluid p-4">
+        <h2 class="mb-4">CVE Analytics Demo - Enhanced Modal Preview</h2>
+        
+        <!-- Enhanced Modal Content (Inline for Demo) -->
+        <div class="modal-content shadow">
+            <div class="modal-header bg-primary text-white">
+                <h5 class="modal-title">CVE Analytics Dashboard</h5>
+                <div class="ms-auto me-3">
+                    <select id="e_release-dropdown" class="form-select form-select-sm">
+                        <option value="">Select Release</option>
+                        <option value="release1" selected>Release 2023.4</option>
+                        <option value="release2">Release 2023.3</option>
+                    </select>
+                </div>
+            </div>
+            
+            <div class="modal-body p-4">
+                <!-- Block 1: Summary Cards -->
+                <div class="row mb-4">
+                    <div class="col-md-6">
+                        <div class="card border-start border-primary border-4 h-100">
+                            <div class="card-body text-center">
+                                <div class="row align-items-center">
+                                    <div class="col-8">
+                                        <h2 class="text-primary mb-1 fw-bold" id="total-cves">2304</h2>
+                                        <p class="text-muted mb-0 fw-semibold">Total CVEs</p>
+                                        <small class="text-info">
+                                            Last updated: <span id="last-updated">now</span>
+                                        </small>
+                                    </div>
+                                    <div class="col-4">
+                                        <div class="text-primary" style="font-size: 2rem;">🛡️</div>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                    <div class="col-md-6">
+                        <div class="card border-start border-success border-4 h-100">
+                            <div class="card-body text-center">
+                                <div class="row align-items-center">
+                                    <div class="col-8">
+                                        <h2 class="text-success mb-1 fw-bold" id="total-tickets">473</h2>
+                                        <p class="text-muted mb-0 fw-semibold">Total Tickets</p>
+                                        <small class="text-info">
+                                            Active remediation
+                                        </small>
+                                    </div>
+                                    <div class="col-4">
+                                        <div class="text-success" style="font-size: 2rem;">📋</div>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Block 2: Tool Status Filters -->
+                <div class="card mb-4 shadow-sm">
+                    <div class="card-header bg-light">
+                        <div class="row align-items-center">
+                            <div class="col">
+                                <h6 class="mb-0 fw-bold">Filter by Tool Status</h6>
+                                <small class="text-muted">Click to view CVEs by analysis status</small>
+                            </div>
+                            <div class="col-auto">
+                                <span class="badge bg-info">
+                                    Active: <span id="current-filter" class="fw-bold">All CVEs</span>
+                                </span>
+                            </div>
+                        </div>
+                    </div>
+                    <div class="card-body">
+                        <div id="tool-status-filters" class="d-flex flex-wrap gap-2">
+                            <button class="btn btn-primary tool-status-btn active" onclick="priority_filter(null)">
+                                All CVEs <span class="badge bg-light text-dark ms-1">2304</span>
+                            </button>
+                            <button class="btn btn-outline-primary tool-status-btn" onclick="priority_filter('Not Analyzed')">
+                                Not Analyzed <span class="badge bg-primary ms-1">2293</span>
+                            </button>
+                            <button class="btn btn-outline-primary tool-status-btn" onclick="priority_filter('Fixed')">
+                                Fixed <span class="badge bg-primary ms-1">3</span>
+                            </button>
+                            <button class="btn btn-outline-primary tool-status-btn" onclick="priority_filter('Rejected-False Positive')">
+                                Rejected-False Positive <span class="badge bg-primary ms-1">3</span>
+                            </button>
+                            <button class="btn btn-outline-primary tool-status-btn" onclick="priority_filter('Not Affected')">
+                                Not Affected <span class="badge bg-primary ms-1">4</span>
+                            </button>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Block 3: Priority Charts Section -->
+                <div class="card shadow-sm">
+                    <div class="card-header bg-gradient-primary text-white">
+                        <div class="row align-items-center">
+                            <div class="col">
+                                <h5 class="mb-1 fw-bold">CVE Priority Distribution</h5>
+                                <small id="chart-subtitle" class="opacity-75">Showing all CVEs</small>
+                            </div>
+                            <div class="col-auto">
+                                <div class="btn-group" role="group">
+                                    <input type="radio" class="btn-check" name="chartDisplayType" id="googleChart" checked>
+                                    <label class="btn btn-outline-light btn-sm" for="googleChart">Google</label>
+                                    <input type="radio" class="btn-check" name="chartDisplayType" id="chartjsChart">
+                                    <label class="btn btn-outline-light btn-sm" for="chartjsChart">Chart.js</label>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                    <div class="card-body position-relative">
+                        <!-- Loading overlay -->
+                        <div class="loading-overlay d-none" id="chart-loading">
+                            <div class="d-flex flex-column align-items-center">
+                                <div class="spinner-border text-primary mb-2" role="status">
+                                    <span class="visually-hidden">Loading...</span>
+                                </div>
+                                <small class="text-muted">Updating chart data...</small>
+                            </div>
+                        </div>
+                        
+                        <!-- Priority Statistics Row -->
+                        <div class="row mb-3" id="priority-stats">
+                            <div class="col text-center">
+                                <div class="p-3 rounded shadow-sm" style="background: rgba(220, 53, 69, 0.1);">
+                                    <div class="h3 mb-1 text-danger fw-bold" id="stat-critical">0</div>
+                                    <small class="text-muted fw-semibold">CRITICAL</small>
+                                </div>
+                            </div>
+                            <div class="col text-center">
+                                <div class="p-3 rounded shadow-sm" style="background: rgba(253, 126, 20, 0.1);">
+                                    <div class="h3 mb-1 fw-bold" style="color: #fd7e14;" id="stat-high">0</div>
+                                    <small class="text-muted fw-semibold">HIGH</small>
+                                </div>
+                            </div>
+                            <div class="col text-center">
+                                <div class="p-3 rounded shadow-sm" style="background: rgba(255, 193, 7, 0.1);">
+                                    <div class="h3 mb-1 fw-bold" style="color: #ffc107;" id="stat-medium">0</div>
+                                    <small class="text-muted fw-semibold">MEDIUM</small>
+                                </div>
+                            </div>
+                            <div class="col text-center">
+                                <div class="p-3 rounded shadow-sm" style="background: rgba(40, 167, 69, 0.1);">
+                                    <div class="h3 mb-1 text-success fw-bold" id="stat-low">0</div>
+                                    <small class="text-muted fw-semibold">LOW</small>
+                                </div>
+                            </div>
+                            <div class="col text-center">
+                                <div class="p-3 rounded shadow-sm" style="background: rgba(108, 117, 125, 0.1);">
+                                    <div class="h3 mb-1 text-secondary fw-bold" id="stat-none">2293</div>
+                                    <small class="text-muted fw-semibold">NONE</small>
+                                </div>
+                            </div>
+                        </div>
+                        
+                        <!-- Chart Container -->
+                        <div class="row">
+                            <div class="col-lg-8">
+                                <!-- Google Charts div -->
+                                <div id="chart_div" style="width: 100%; height: 400px;"></div>
+                                
+                                <!-- Chart.js canvas (hidden by default) -->
+                                <div id="chartjs-container" class="d-none">
+                                    <canvas id="priorityChartJs" style="width: 100%; height: 400px;"></canvas>
+                                </div>
+                            </div>
+                            <div class="col-lg-4">
+                                <!-- Enhanced Insights Panel -->
+                                <div class="h-100 d-flex flex-column">
+                                    <h6 class="fw-bold mb-3">Key Insights</h6>
+                                    
+                                    <div class="mb-3">
+                                        <div class="d-flex justify-content-between align-items-center mb-1">
+                                            <small class="text-muted">High Risk CVEs</small>
+                                            <span class="badge bg-danger" id="risk-percentage">0%</span>
+                                        </div>
+                                        <div class="progress" style="height: 8px;">
+                                            <div class="progress-bar bg-danger" id="risk-progress" style="width: 0%"></div>
+                                        </div>
+                                    </div>
+                                    
+                                    <div class="mb-3">
+                                        <div class="d-flex justify-content-between align-items-center mb-1">
+                                            <small class="text-muted">Unanalyzed</small>
+                                            <span class="badge bg-warning" id="unanalyzed-percentage">99.5%</span>
+                                        </div>
+                                        <div class="progress" style="height: 8px;">
+                                            <div class="progress-bar bg-warning" id="unanalyzed-progress" style="width:
