@@ -1,0 +1,359 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>CVE Analytics - Dashboard Grid</title>
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+    <style>
+        .dashboard-card {
+            border: none;
+            border-radius: 16px;
+            box-shadow: 0 4px 20px rgba(0,0,0,0.08);
+            transition: transform 0.3s ease, box-shadow 0.3s ease;
+            overflow: hidden;
+        }
+        .dashboard-card:hover {
+            transform: translateY(-5px);
+            box-shadow: 0 8px 30px rgba(0,0,0,0.15);
+        }
+        .metric-circle {
+            width: 80px;
+            height: 80px;
+            border-radius: 50%;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 1.5rem;
+            font-weight: bold;
+            color: white;
+            margin: 0 auto 1rem;
+        }
+        .priority-card {
+            background: linear-gradient(135deg, var(--bg-start) 0%, var(--bg-end) 100%);
+            color: white;
+            border: none;
+        }
+        .critical-card { --bg-start: #dc3545; --bg-end: #b02a37; }
+        .high-card { --bg-start: #fd7e14; --bg-end: #e8590c; }
+        .medium-card { --bg-start: #ffc107; --bg-end: #e0a800; }
+        .low-card { --bg-start: #28a745; --bg-end: #1e7e34; }
+        .none-card { --bg-start: #6c757d; --bg-end: #545b62; }
+        
+        .status-pill {
+            display: inline-block;
+            padding: 8px 16px;
+            border-radius: 20px;
+            font-size: 0.85rem;
+            font-weight: 500;
+            margin: 4px;
+            background: rgba(255,255,255,0.1);
+            backdrop-filter: blur(10px);
+            border: 1px solid rgba(255,255,255,0.2);
+        }
+        .chart-card {
+            min-height: 400px;
+        }
+        .filter-chip {
+            display: inline-block;
+            padding: 6px 12px;
+            background: #f8f9fa;
+            border: 2px solid #e9ecef;
+            border-radius: 20px;
+            font-size: 0.85rem;
+            cursor: pointer;
+            transition: all 0.3s ease;
+            margin: 4px;
+        }
+        .filter-chip.active {
+            background: #007bff;
+            color: white;
+            border-color: #007bff;
+        }
+        .filter-chip:hover {
+            border-color: #007bff;
+        }
+        .insight-badge {
+            position: absolute;
+            top: 15px;
+            right: 15px;
+            background: rgba(255,255,255,0.9);
+            color: #333;
+            padding: 4px 8px;
+            border-radius: 12px;
+            font-size: 0.75rem;
+            font-weight: 500;
+        }
+    </style>
+</head>
+<body class="bg-light">
+    <div class="container-fluid p-4">
+        <div class="row mb-4">
+            <div class="col">
+                <h2 class="fw-bold">CVE Security Dashboard</h2>
+                <p class="text-muted mb-0">Real-time vulnerability analysis and risk assessment</p>
+            </div>
+            <div class="col-auto">
+                <select class="form-select" id="releaseSelect">
+                    <option>Release 2023.4</option>
+                    <option>Release 2023.3</option>
+                </select>
+            </div>
+        </div>
+
+        <!-- Summary Metrics Row -->
+        <div class="row mb-4">
+            <div class="col-md-3">
+                <div class="card dashboard-card text-center p-4">
+                    <div class="metric-circle" style="background: linear-gradient(135deg, #007bff, #0056b3);">
+                        2304
+                    </div>
+                    <h5 class="fw-bold mb-1">Total CVEs</h5>
+                    <p class="text-muted mb-0">Security vulnerabilities</p>
+                </div>
+            </div>
+            <div class="col-md-3">
+                <div class="card dashboard-card text-center p-4">
+                    <div class="metric-circle" style="background: linear-gradient(135deg, #28a745, #1e7e34);">
+                        473
+                    </div>
+                    <h5 class="fw-bold mb-1">Active Tickets</h5>
+                    <p class="text-muted mb-0">Remediation efforts</p>
+                </div>
+            </div>
+            <div class="col-md-3">
+                <div class="card dashboard-card text-center p-4 position-relative">
+                    <div class="insight-badge">99.5%</div>
+                    <div class="metric-circle" style="background: linear-gradient(135deg, #ffc107, #e0a800);">
+                        11
+                    </div>
+                    <h5 class="fw-bold mb-1">Analyzed</h5>
+                    <p class="text-muted mb-0">Completed analysis</p>
+                </div>
+            </div>
+            <div class="col-md-3">
+                <div class="card dashboard-card text-center p-4">
+                    <div class="metric-circle" style="background: linear-gradient(135deg, #dc3545, #b02a37);">
+                        0.5%
+                    </div>
+                    <h5 class="fw-bold mb-1">Coverage</h5>
+                    <p class="text-muted mb-0">Analysis progress</p>
+                </div>
+            </div>
+        </div>
+
+        <!-- Priority Distribution Cards -->
+        <div class="row mb-4">
+            <div class="col-md-2 col-sm-6 mb-3">
+                <div class="card priority-card critical-card text-center p-3 position-relative">
+                    <div class="insight-badge">0%</div>
+                    <h2 class="fw-bold mb-1">0</h2>
+                    <h6 class="mb-0">CRITICAL</h6>
+                    <small class="opacity-75">Immediate action</small>
+                </div>
+            </div>
+            <div class="col-md-2 col-sm-6 mb-3">
+                <div class="card priority-card high-card text-center p-3 position-relative">
+                    <div class="insight-badge">0%</div>
+                    <h2 class="fw-bold mb-1">0</h2>
+                    <h6 class="mb-0">HIGH</h6>
+                    <small class="opacity-75">Priority fix</small>
+                </div>
+            </div>
+            <div class="col-md-2 col-sm-6 mb-3">
+                <div class="card priority-card medium-card text-center p-3 position-relative">
+                    <div class="insight-badge">0%</div>
+                    <h2 class="fw-bold mb-1">0</h2>
+                    <h6 class="mb-0">MEDIUM</h6>
+                    <small class="opacity-75">Scheduled</small>
+                </div>
+            </div>
+            <div class="col-md-2 col-sm-6 mb-3">
+                <div class="card priority-card low-card text-center p-3 position-relative">
+                    <div class="insight-badge">0.5%</div>
+                    <h2 class="fw-bold mb-1">11</h2>
+                    <h6 class="mb-0">LOW</h6>
+                    <small class="opacity-75">Monitor</small>
+                </div>
+            </div>
+            <div class="col-md-4 col-sm-12 mb-3">
+                <div class="card priority-card none-card text-center p-3 position-relative">
+                    <div class="insight-badge">99.5%</div>
+                    <h2 class="fw-bold mb-1">2293</h2>
+                    <h6 class="mb-0">UNANALYZED</h6>
+                    <small class="opacity-75">Requires immediate attention</small>
+                </div>
+            </div>
+        </div>
+
+        <!-- Tool Status Filters -->
+        <div class="row mb-4">
+            <div class="col">
+                <div class="card dashboard-card p-4">
+                    <h5 class="fw-bold mb-3">Filter by Analysis Status</h5>
+                    <div class="d-flex flex-wrap">
+                        <span class="filter-chip active" onclick="filterByStatus('all')">
+                            All CVEs <span class="badge bg-primary ms-1">2304</span>
+                        </span>
+                        <span class="filter-chip" onclick="filterByStatus('not-analyzed')">
+                            Not Analyzed <span class="badge bg-secondary ms-1">2293</span>
+                        </span>
+                        <span class="filter-chip" onclick="filterByStatus('fixed')">
+                            Fixed <span class="badge bg-success ms-1">3</span>
+                        </span>
+                        <span class="filter-chip" onclick="filterByStatus('rejected')">
+                            Rejected-False Positive <span class="badge bg-warning ms-1">3</span>
+                        </span>
+                        <span class="filter-chip" onclick="filterByStatus('not-affected')">
+                            Not Affected <span class="badge bg-info ms-1">4</span>
+                        </span>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Charts Row -->
+        <div class="row">
+            <div class="col-lg-8 mb-4">
+                <div class="card dashboard-card chart-card p-4">
+                    <div class="d-flex justify-content-between align-items-center mb-3">
+                        <h5 class="fw-bold mb-0">Priority Distribution Analysis</h5>
+                        <div class="btn-group" role="group">
+                            <input type="radio" class="btn-check" name="chartType" id="barChart" checked>
+                            <label class="btn btn-outline-primary btn-sm" for="barChart">Bar</label>
+                            <input type="radio" class="btn-check" name="chartType" id="doughnutChart">
+                            <label class="btn btn-outline-primary btn-sm" for="doughnutChart">Doughnut</label>
+                            <input type="radio" class="btn-check" name="chartType" id="radarChart">
+                            <label class="btn btn-outline-primary btn-sm" for="radarChart">Radar</label>
+                        </div>
+                    </div>
+                    <canvas id="mainChart" style="height: 350px;"></canvas>
+                </div>
+            </div>
+            
+            <div class="col-lg-4 mb-4">
+                <div class="card dashboard-card p-4 h-100">
+                    <h5 class="fw-bold mb-3">Risk Assessment</h5>
+                    
+                    <div class="mb-4">
+                        <div class="d-flex justify-content-between mb-2">
+                            <span>Critical Risk</span>
+                            <span class="fw-bold text-danger">0%</span>
+                        </div>
+                        <div class="progress" style="height: 8px;">
+                            <div class="progress-bar bg-danger" style="width: 0%"></div>
+                        </div>
+                    </div>
+                    
+                    <div class="mb-4">
+                        <div class="d-flex justify-content-between mb-2">
+                            <span>Analysis Gap</span>
+                            <span class="fw-bold text-warning">99.5%</span>
+                        </div>
+                        <div class="progress" style="height: 8px;">
+                            <div class="progress-bar bg-warning" style="width: 99.5%"></div>
+                        </div>
+                    </div>
+                    
+                    <div class="mb-4">
+                        <div class="d-flex justify-content-between mb-2">
+                            <span>Remediation Rate</span>
+                            <span class="fw-bold text-success">0.5%</span>
+                        </div>
+                        <div class="progress" style="height: 8px;">
+                            <div class="progress-bar bg-success" style="width: 0.5%"></div>
+                        </div>
+                    </div>
+                    
+                    <div class="alert alert-warning">
+                        <h6 class="alert-heading">Action Required</h6>
+                        <p class="mb-0 small">99.5% of CVEs are unanalyzed. Consider increasing analysis capacity.</p>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js"></script>
+    <script>
+        let currentChart = null;
+        
+        const sampleData = {
+            labels: ['Critical', 'High', 'Medium', 'Low', 'None'],
+            data: [0, 0, 0, 11, 2293],
+            colors: ['#dc3545', '#fd7e14', '#ffc107', '#28a745', '#6c757d']
+        };
+        
+        function createChart(type) {
+            const ctx = document.getElementById('mainChart').getContext('2d');
+            
+            if (currentChart) {
+                currentChart.destroy();
+            }
+            
+            const config = {
+                type: type,
+                data: {
+                    labels: sampleData.labels,
+                    datasets: [{
+                        label: 'CVE Count',
+                        data: sampleData.data,
+                        backgroundColor: sampleData.colors,
+                        borderColor: sampleData.colors,
+                        borderWidth: type === 'radar' ? 2 : 1,
+                        fill: type === 'radar',
+                        tension: 0.3
+                    }]
+                },
+                options: {
+                    responsive: true,
+                    maintainAspectRatio: false,
+                    plugins: {
+                        legend: {
+                            display: type !== 'bar',
+                            position: 'bottom'
+                        }
+                    },
+                    scales: type === 'radar' ? {
+                        r: {
+                            beginAtZero: true,
+                            max: Math.max(...sampleData.data) * 1.1
+                        }
+                    } : (type === 'bar' ? {
+                        y: {
+                            beginAtZero: true
+                        }
+                    } : {})
+                }
+            };
+            
+            currentChart = new Chart(ctx, config);
+        }
+        
+        function filterByStatus(status) {
+            // Update active filter
+            document.querySelectorAll('.filter-chip').forEach(chip => {
+                chip.classList.remove('active');
+            });
+            event.target.classList.add('active');
+            
+            // Simulate data update based on filter
+            console.log('Filtering by:', status);
+        }
+        
+        // Initialize with bar chart
+        createChart('bar');
+        
+        // Chart type switcher
+        document.querySelectorAll('input[name="chartType"]').forEach(input => {
+            input.addEventListener('change', function() {
+                if (this.checked) {
+                    const chartType = this.id.replace('Chart', '');
+                    createChart(chartType === 'doughnut' ? 'doughnut' : chartType === 'radar' ? 'radar' : 'bar');
+                }
+            });
+        });
+    </script>
+</body>
+</html>
