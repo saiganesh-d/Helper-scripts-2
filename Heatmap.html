@@ -1,0 +1,565 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>CVE Analytics - Heatmap Timeline</title>
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
+    <script src="https://d3js.org/d3.v7.min.js"></script>
+    <style>
+        .heatmap-container {
+            background: #1a1a2e;
+            border-radius: 15px;
+            padding: 20px;
+            color: white;
+        }
+        .heatmap-cell {
+            cursor: pointer;
+            transition: all 0.3s ease;
+        }
+        .heatmap-cell:hover {
+            stroke: #fff;
+            stroke-width: 2px;
+        }
+        .timeline-card {
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            border: none;
+            color: white;
+            border-radius: 15px;
+        }
+        .severity-legend {
+            display: flex;
+            align-items: center;
+            gap: 10px;
+            margin: 10px 0;
+        }
+        .legend-item {
+            display: flex;
+            align-items: center;
+            gap: 5px;
+            font-size: 0.9rem;
+        }
+        .legend-color {
+            width: 15px;
+            height: 15px;
+            border-radius: 3px;
+        }
+        .metric-box {
+            background: rgba(255,255,255,0.1);
+            backdrop-filter: blur(10px);
+            border: 1px solid rgba(255,255,255,0.2);
+            border-radius: 12px;
+            padding: 20px;
+            text-align: center;
+            color: white;
+        }
+        .trend-indicator {
+            font-size: 1.5rem;
+            font-weight: bold;
+        }
+        .trend-up { color: #ff6b6b; }
+        .trend-down { color: #51cf66; }
+        .trend-stable { color: #ffd43b; }
+        .priority-meter {
+            position: relative;
+            height: 200px;
+            background: linear-gradient(180deg, 
+                #dc3545 0%, 
+                #fd7e14 25%, 
+                #ffc107 50%, 
+                #28a745 75%, 
+                #6c757d 100%);
+            border-radius: 10px;
+            overflow: hidden;
+        }
+        .meter-indicator {
+            position: absolute;
+            right: -20px;
+            width: 40px;
+            height: 4px;
+            background: white;
+            border-radius: 2px;
+            box-shadow: 0 0 10px rgba(255,255,255,0.5);
+        }
+        .activity-pulse {
+            width: 20px;
+            height: 20px;
+            border-radius: 50%;
+            animation: pulse 2s infinite;
+        }
+        @keyframes pulse {
+            0% { transform: scale(0.95); box-shadow: 0 0 0 0 rgba(255, 255, 255, 0.7); }
+            70% { transform: scale(1); box-shadow: 0 0 0 10px rgba(255, 255, 255, 0); }
+            100% { transform: scale(0.95); box-shadow: 0 0 0 0 rgba(255, 255, 255, 0); }
+        }
+        .tooltip {
+            position: absolute;
+            background: rgba(0,0,0,0.9);
+            color: white;
+            padding: 10px;
+            border-radius: 6px;
+            font-size: 12px;
+            pointer-events: none;
+            z-index: 1000;
+            border: 1px solid #444;
+        }
+    </style>
+</head>
+<body class="bg-dark text-white">
+    <div class="container-fluid p-4">
+        <div class="row mb-4">
+            <div class="col">
+                <h2 class="fw-bold text-white">CVE Timeline & Heat Analysis</h2>
+                <p class="text-light">Temporal patterns and severity distribution over time</p>
+            </div>
+            <div class="col-auto">
+                <div class="btn-group" role="group">
+                    <button class="btn btn-outline-light btn-sm" onclick="changeTimeRange('week')">Week</button>
+                    <button class="btn btn-light btn-sm" onclick="changeTimeRange('month')">Month</button>
+                    <button class="btn btn-outline-light btn-sm" onclick="changeTimeRange('quarter')">Quarter</button>
+                </div>
+            </div>
+        </div>
+
+        <!-- Key Metrics Row -->
+        <div class="row mb-4">
+            <div class="col-md-3">
+                <div class="metric-box">
+                    <div class="activity-pulse bg-danger mx-auto mb-2"></div>
+                    <h3 class="fw-bold">2304</h3>
+                    <p class="mb-1">Total CVEs</p>
+                    <span class="trend-indicator trend-up">↗ +15%</span>
+                </div>
+            </div>
+            <div class="col-md-3">
+                <div class="metric-box">
+                    <div class="activity-pulse bg-warning mx-auto mb-2"></div>
+                    <h3 class="fw-bold">0.5%</h3>
+                    <p class="mb-1">Analysis Rate</p>
+                    <span class="trend-indicator trend-down">↘ -5%</span>
+                </div>
+            </div>
+            <div class="col-md-3">
+                <div class="metric-box">
+                    <div class="activity-pulse bg-success mx-auto mb-2"></div>
+                    <h3 class="fw-bold">27%</h3>
+                    <p class="mb-1">Resolution Rate</p>
+                    <span class="trend-indicator trend-stable">→ Stable</span>
+                </div>
+            </div>
+            <div class="col-md-3">
+                <div class="metric-box">
+                    <div class="priority-meter">
+                        <div class="meter-indicator" style="top: 95%;"></div>
+                    </div>
+                    <p class="mt-2 mb-0">Risk Level: <strong>LOW</strong></p>
+                </div>
+            </div>
+        </div>
+
+        <!-- Main Heatmap -->
+        <div class="row mb-4">
+            <div class="col">
+                <div class="card timeline-card">
+                    <div class="card-header">
+                        <div class="row align-items-center">
+                            <div class="col">
+                                <h5 class="mb-0">CVE Activity Heatmap - Last 30 Days</h5>
+                            </div>
+                            <div class="col-auto">
+                                <div class="severity-legend">
+                                    <div class="legend-item">
+                                        <div class="legend-color" style="background: #2d3748;"></div>
+                                        <span>0</span>
+                                    </div>
+                                    <div class="legend-item">
+                                        <div class="legend-color" style="background: #4a5568;"></div>
+                                        <span>1-5</span>
+                                    </div>
+                                    <div class="legend-item">
+                                        <div class="legend-color" style="background: #718096;"></div>
+                                        <span>6-20</span>
+                                    </div>
+                                    <div class="legend-item">
+                                        <div class="legend-color" style="background: #a0aec0;"></div>
+                                        <span>21-50</span>
+                                    </div>
+                                    <div class="legend-item">
+                                        <div class="legend-color" style="background: #e2e8f0;"></div>
+                                        <span>50+</span>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                    <div class="card-body">
+                        <div id="heatmap" style="height: 200px;"></div>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Priority Breakdown -->
+        <div class="row mb-4">
+            <div class="col-lg-8">
+                <div class="card bg-dark border-light">
+                    <div class="card-header">
+                        <h5 class="mb-0 text-white">Severity Distribution Timeline</h5>
+                    </div>
+                    <div class="card-body">
+                        <div id="severity-timeline" style="height: 300px;"></div>
+                    </div>
+                </div>
+            </div>
+            <div class="col-lg-4">
+                <div class="card bg-dark border-light">
+                    <div class="card-header">
+                        <h5 class="mb-0 text-white">Current Status</h5>
+                    </div>
+                    <div class="card-body">
+                        <div class="mb-3">
+                            <div class="d-flex justify-content-between mb-1">
+                                <span class="text-light">Critical</span>
+                                <span class="text-danger fw-bold">0</span>
+                            </div>
+                            <div class="progress bg-secondary">
+                                <div class="progress-bar bg-danger" style="width: 0%"></div>
+                            </div>
+                        </div>
+                        
+                        <div class="mb-3">
+                            <div class="d-flex justify-content-between mb-1">
+                                <span class="text-light">High</span>
+                                <span class="text-warning fw-bold">0</span>
+                            </div>
+                            <div class="progress bg-secondary">
+                                <div class="progress-bar bg-warning" style="width: 0%"></div>
+                            </div>
+                        </div>
+                        
+                        <div class="mb-3">
+                            <div class="d-flex justify-content-between mb-1">
+                                <span class="text-light">Medium</span>
+                                <span class="text-info fw-bold">0</span>
+                            </div>
+                            <div class="progress bg-secondary">
+                                <div class="progress-bar bg-info" style="width: 0%"></div>
+                            </div>
+                        </div>
+                        
+                        <div class="mb-3">
+                            <div class="d-flex justify-content-between mb-1">
+                                <span class="text-light">Low</span>
+                                <span class="text-success fw-bold">11</span>
+                            </div>
+                            <div class="progress bg-secondary">
+                                <div class="progress-bar bg-success" style="width: 100%"></div>
+                            </div>
+                        </div>
+                        
+                        <div class="alert alert-warning">
+                            <h6>⚠️ Analysis Bottleneck</h6>
+                            <p class="mb-0 small">2293 CVEs awaiting analysis</p>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Weekly Pattern Analysis -->
+        <div class="row">
+            <div class="col">
+                <div class="card bg-dark border-light">
+                    <div class="card-header">
+                        <h5 class="mb-0 text-white">Weekly Activity Pattern</h5>
+                    </div>
+                    <div class="card-body">
+                        <div id="weekly-pattern" style="height: 150px;"></div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        // Generate sample data for the last 30 days
+        function generateHeatmapData() {
+            const data = [];
+            const today = new Date();
+            
+            for (let i = 29; i >= 0; i--) {
+                const date = new Date(today);
+                date.setDate(date.getDate() - i);
+                
+                // Simulate CVE activity (higher on weekdays, lower on weekends)
+                const isWeekend = date.getDay() === 0 || date.getDay() === 6;
+                const baseActivity = isWeekend ? 0 : Math.floor(Math.random() * 5);
+                
+                data.push({
+                    date: date,
+                    critical: 0,
+                    high: 0,
+                    medium: 0,
+                    low: i === 0 ? 11 : 0, // All low priority CVEs on most recent day
+                    total: i === 0 ? 11 : baseActivity
+                });
+            }
+            return data;
+        }
+        
+        function createHeatmap() {
+            const data = generateHeatmapData();
+            const margin = {top: 20, right: 20, bottom: 30, left: 50};
+            const width = document.getElementById('heatmap').offsetWidth - margin.left - margin.right;
+            const height = 200 - margin.top - margin.bottom;
+            
+            const svg = d3.select("#heatmap")
+                .append("svg")
+                .attr("width", width + margin.left + margin.right)
+                .attr("height", height + margin.top + margin.bottom);
+            
+            const g = svg.append("g")
+                .attr("transform", `translate(${margin.left},${margin.top})`);
+            
+            // Color scale
+            const colorScale = d3.scaleSequential()
+                .interpolator(d3.interpolateBlues)
+                .domain([0, d3.max(data, d => d.total)]);
+            
+            // Scales
+            const xScale = d3.scaleBand()
+                .domain(data.map(d => d3.timeFormat("%m/%d")(d.date)))
+                .range([0, width])
+                .padding(0.1);
+            
+            const cellHeight = height * 0.8;
+            
+            // Tooltip
+            const tooltip = d3.select("body").append("div")
+                .attr("class", "tooltip")
+                .style("opacity", 0);
+            
+            // Create heatmap cells
+            g.selectAll(".heatmap-cell")
+                .data(data)
+                .enter().append("rect")
+                .attr("class", "heatmap-cell")
+                .attr("x", d => xScale(d3.timeFormat("%m/%d")(d.date)))
+                .attr("y", height * 0.1)
+                .attr("width", xScale.bandwidth())
+                .attr("height", cellHeight)
+                .attr("fill", d => d.total === 0 ? "#2d3748" : colorScale(d.total))
+                .on("mouseover", function(event, d) {
+                    tooltip.transition().duration(200).style("opacity", .9);
+                    tooltip.html(`
+                        <strong>${d3.timeFormat("%B %d")(d.date)}</strong><br/>
+                        Total CVEs: ${d.total}<br/>
+                        Critical: ${d.critical}<br/>
+                        High: ${d.high}<br/>
+                        Medium: ${d.medium}<br/>
+                        Low: ${d.low}
+                    `)
+                    .style("left", (event.pageX + 10) + "px")
+                    .style("top", (event.pageY - 28) + "px");
+                })
+                .on("mouseout", function(d) {
+                    tooltip.transition().duration(500).style("opacity", 0);
+                });
+            
+            // Add x-axis (show every 5th day)
+            const xAxis = d3.axisBottom(xScale)
+                .tickValues(xScale.domain().filter((d, i) => i % 5 === 0));
+            
+            g.append("g")
+                .attr("transform", `translate(0, ${height})`)
+                .call(xAxis)
+                .selectAll("text")
+                .style("fill", "white");
+        }
+        
+        function createSeverityTimeline() {
+            const data = generateHeatmapData();
+            const margin = {top: 20, right: 20, bottom: 30, left: 50};
+            const width = document.getElementById('severity-timeline').offsetWidth - margin.left - margin.right;
+            const height = 300 - margin.top - margin.bottom;
+            
+            const svg = d3.select("#severity-timeline")
+                .append("svg")
+                .attr("width", width + margin.left + margin.right)
+                .attr("height", height + margin.top + margin.bottom);
+            
+            const g = svg.append("g")
+                .attr("transform", `translate(${margin.left},${margin.top})`);
+            
+            // Scales
+            const xScale = d3.scaleTime()
+                .domain(d3.extent(data, d => d.date))
+                .range([0, width]);
+            
+            const yScale = d3.scaleLinear()
+                .domain([0, d3.max(data, d => d.total)])
+                .range([height, 0]);
+            
+            // Line generator
+            const line = d3.line()
+                .x(d => xScale(d.date))
+                .y(d => yScale(d.total))
+                .curve(d3.curveMonotoneX);
+            
+            // Add gradient
+            const gradient = svg.append("defs")
+                .append("linearGradient")
+                .attr("id", "area-gradient")
+                .attr("gradientUnits", "userSpaceOnUse")
+                .attr("x1", 0).attr("y1", height)
+                .attr("x2", 0).attr("y2", 0);
+            
+            gradient.append("stop")
+                .attr("offset", "0%")
+                .attr("stop-color", "#667eea")
+                .attr("stop-opacity", 0.1);
+            
+            gradient.append("stop")
+                .attr("offset", "100%")
+                .attr("stop-color", "#667eea")
+                .attr("stop-opacity", 0.8);
+            
+            // Area generator
+            const area = d3.area()
+                .x(d => xScale(d.date))
+                .y0(height)
+                .y1(d => yScale(d.total))
+                .curve(d3.curveMonotoneX);
+            
+            // Add area
+            g.append("path")
+                .datum(data)
+                .attr("fill", "url(#area-gradient)")
+                .attr("d", area);
+            
+            // Add line
+            g.append("path")
+                .datum(data)
+                .attr("fill", "none")
+                .attr("stroke", "#667eea")
+                .attr("stroke-width", 2)
+                .attr("d", line);
+            
+            // Add dots
+            g.selectAll(".dot")
+                .data(data)
+                .enter().append("circle")
+                .attr("class", "dot")
+                .attr("cx", d => xScale(d.date))
+                .attr("cy", d => yScale(d.total))
+                .attr("r", 3)
+                .attr("fill", "#667eea");
+            
+            // Add axes
+            g.append("g")
+                .attr("transform", `translate(0, ${height})`)
+                .call(d3.axisBottom(xScale).ticks(7))
+                .selectAll("text")
+                .style("fill", "white");
+            
+            g.append("g")
+                .call(d3.axisLeft(yScale))
+                .selectAll("text")
+                .style("fill", "white");
+        }
+        
+        function createWeeklyPattern() {
+            const days = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'];
+            const values = [85, 92, 78, 65, 45, 12, 8]; // Sample weekly pattern
+            
+            const margin = {top: 20, right: 20, bottom: 30, left: 50};
+            const width = document.getElementById('weekly-pattern').offsetWidth - margin.left - margin.right;
+            const height = 150 - margin.top - margin.bottom;
+            
+            const svg = d3.select("#weekly-pattern")
+                .append("svg")
+                .attr("width", width + margin.left + margin.right)
+                .attr("height", height + margin.top + margin.bottom);
+            
+            const g = svg.append("g")
+                .attr("transform", `translate(${margin.left},${margin.top})`);
+            
+            const xScale = d3.scaleBand()
+                .domain(days)
+                .range([0, width])
+                .padding(0.3);
+            
+            const yScale = d3.scaleLinear()
+                .domain([0, d3.max(values)])
+                .range([height, 0]);
+            
+            // Color scale for days
+            const colorScale = d3.scaleOrdinal()
+                .domain(days)
+                .range(['#667eea', '#667eea', '#667eea', '#667eea', '#667eea', '#ffa726', '#ffa726']);
+            
+            g.selectAll(".bar")
+                .data(days)
+                .enter().append("rect")
+                .attr("class", "bar")
+                .attr("x", d => xScale(d))
+                .attr("width", xScale.bandwidth())
+                .attr("y", (d, i) => yScale(values[i]))
+                .attr("height", (d, i) => height - yScale(values[i]))
+                .attr("fill", d => colorScale(d))
+                .attr("rx", 4);
+            
+            // Add value labels
+            g.selectAll(".label")
+                .data(days)
+                .enter().append("text")
+                .attr("class", "label")
+                .attr("x", d => xScale(d) + xScale.bandwidth() / 2)
+                .attr("y", (d, i) => yScale(values[i]) - 5)
+                .attr("text-anchor", "middle")
+                .style("fill", "white")
+                .style("font-size", "12px")
+                .text((d, i) => values[i]);
+            
+            // Add x-axis
+            g.append("g")
+                .attr("transform", `translate(0, ${height})`)
+                .call(d3.axisBottom(xScale))
+                .selectAll("text")
+                .style("fill", "white");
+        }
+        
+        function changeTimeRange(range) {
+            // Update button states
+            document.querySelectorAll('.btn-group .btn').forEach(btn => {
+                btn.classList.remove('btn-light');
+                btn.classList.add('btn-outline-light');
+            });
+            event.target.classList.remove('btn-outline-light');
+            event.target.classList.add('btn-light');
+            
+            // Simulate data refresh
+            console.log('Changing time range to:', range);
+        }
+        
+        // Initialize all charts
+        document.addEventListener('DOMContentLoaded', function() {
+            setTimeout(() => {
+                createHeatmap();
+                createSeverityTimeline();
+                createWeeklyPattern();
+            }, 100);
+        });
+        
+        // Handle responsive redraw
+        window.addEventListener('resize', function() {
+            d3.selectAll("svg").remove();
+            setTimeout(() => {
+                createHeatmap();
+                createSeverityTimeline();
+                createWeeklyPattern();
+            }, 100);
+        });
+    </script>
+</body>
+</html>
