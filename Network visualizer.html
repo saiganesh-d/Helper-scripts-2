@@ -1,0 +1,515 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>CVE Analytics - Network Diagram</title>
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
+    <script src="https://d3js.org/d3.v7.min.js"></script>
+    <style>
+        .network-container {
+            background: radial-gradient(circle at center, #1a1a2e 0%, #16213e 100%);
+            border-radius: 15px;
+            position: relative;
+            overflow: hidden;
+        }
+        .node {
+            cursor: pointer;
+            transition: all 0.3s ease;
+        }
+        .node:hover {
+            stroke: #fff;
+            stroke-width: 3px;
+        }
+        .link {
+            stroke: rgba(255,255,255,0.3);
+            stroke-width: 1;
+        }
+        .node-label {
+            fill: white;
+            font-size: 12px;
+            text-anchor: middle;
+            pointer-events: none;
+            font-weight: 500;
+        }
+        .control-panel {
+            position: absolute;
+            top: 20px;
+            left: 20px;
+            background: rgba(0,0,0,0.8);
+            border-radius: 10px;
+            padding: 15px;
+            color: white;
+            min-width: 200px;
+        }
+        .legend-panel {
+            position: absolute;
+            top: 20px;
+            right: 20px;
+            background: rgba(0,0,0,0.8);
+            border-radius: 10px;
+            padding: 15px;
+            color: white;
+        }
+        .metric-node {
+            border-radius: 15px;
+            padding: 20px;
+            text-align: center;
+            color: white;
+            margin: 10px;
+            backdrop-filter: blur(10px);
+            border: 1px solid rgba(255,255,255,0.1);
+        }
+        .central-node { background: radial-gradient(circle, #667eea, #764ba2); }
+        .priority-node { background: radial-gradient(circle, #f093fb, #f5576c); }
+        .status-node { background: radial-gradient(circle, #4facfe, #00f2fe); }
+        .analysis-node { background: radial-gradient(circle, #fa709a, #fee140); }
+        
+        .connection-strength-1 { stroke-width: 1; stroke: rgba(255,255,255,0.2); }
+        .connection-strength-2 { stroke-width: 2; stroke: rgba(255,255,255,0.4); }
+        .connection-strength-3 { stroke-width: 3; stroke: rgba(255,255,255,0.6); }
+        .connection-strength-4 { stroke-width: 4; stroke: rgba(255,255,255,0.8); }
+        .connection-strength-5 { stroke-width: 5; stroke: rgba(255,255,255,1.0); }
+        
+        .tooltip {
+            position: absolute;
+            background: rgba(0,0,0,0.9);
+            color: white;
+            padding: 12px;
+            border-radius: 8px;
+            font-size: 13px;
+            pointer-events: none;
+            z-index: 1000;
+            border: 1px solid #444;
+            box-shadow: 0 4px 20px rgba(0,0,0,0.5);
+        }
+        
+        .simulation-controls {
+            display: flex;
+            gap: 10px;
+            margin: 10px 0;
+        }
+        
+        .control-btn {
+            background: rgba(255,255,255,0.1);
+            border: 1px solid rgba(255,255,255,0.3);
+            color: white;
+            padding: 5px 10px;
+            border-radius: 5px;
+            cursor: pointer;
+            font-size: 12px;
+        }
+        
+        .control-btn:hover {
+            background: rgba(255,255,255,0.2);
+        }
+        
+        .control-btn.active {
+            background: #667eea;
+        }
+    </style>
+</head>
+<body class="bg-dark">
+    <div class="container-fluid p-4">
+        <div class="row mb-3">
+            <div class="col">
+                <h2 class="text-white fw-bold">CVE Relationship Network</h2>
+                <p class="text-light">Interactive visualization of CVE connections and dependencies</p>
+            </div>
+        </div>
+
+        <!-- Summary Cards -->
+        <div class="row mb-4">
+            <div class="col-md-3">
+                <div class="metric-node central-node">
+                    <h3 class="fw-bold">2304</h3>
+                    <p class="mb-0">Total CVEs</p>
+                    <small>Central Hub</small>
+                </div>
+            </div>
+            <div class="col-md-3">
+                <div class="metric-node priority-node">
+                    <h3 class="fw-bold">11</h3>
+                    <p class="mb-0">Prioritized</p>
+                    <small>Risk Assessed</small>
+                </div>
+            </div>
+            <div class="col-md-3">
+                <div class="metric-node status-node">
+                    <h3 class="fw-bold">4</h3>
+                    <p class="mb-0">Status Types</p>
+                    <small>Analysis States</small>
+                </div>
+            </div>
+            <div class="col-md-3">
+                <div class="metric-node analysis-node">
+                    <h3 class="fw-bold">473</h3>
+                    <p class="mb-0">Active Tickets</p>
+                    <small>In Progress</small>
+                </div>
+            </div>
+        </div>
+
+        <!-- Network Visualization -->
+        <div class="row">
+            <div class="col">
+                <div class="card bg-dark border-secondary">
+                    <div class="card-body p-0">
+                        <div class="network-container" style="height: 600px; position: relative;">
+                            <!-- Control Panel -->
+                            <div class="control-panel">
+                                <h6 class="mb-3">Network Controls</h6>
+                                <div class="simulation-controls">
+                                    <button class="control-btn active" onclick="setLayout('force')">Force</button>
+                                    <button class="control-btn" onclick="setLayout('circular')">Circular</button>
+                                    <button class="control-btn" onclick="setLayout('hierarchical')">Tree</button>
+                                </div>
+                                
+                                <div class="mb-3">
+                                    <label class="form-label small">Connection Strength</label>
+                                    <input type="range" class="form-range" id="linkStrength" min="0.1" max="2" step="0.1" value="1">
+                                </div>
+                                
+                                <div class="mb-3">
+                                    <label class="form-label small">Node Charge</label>
+                                    <input type="range" class="form-range" id="nodeCharge" min="-500" max="-50" step="10" value="-200">
+                                </div>
+                                
+                                <button class="btn btn-sm btn-outline-light" onclick="resetSimulation()">Reset</button>
+                            </div>
+
+                            <!-- Legend Panel -->
+                            <div class="legend-panel">
+                                <h6 class="mb-3">Legend</h6>
+                                <div class="d-flex align-items-center mb-2">
+                                    <div style="width: 20px; height: 20px; background: #667eea; border-radius: 50%; margin-right: 8px;"></div>
+                                    <small>CVE Hub</small>
+                                </div>
+                                <div class="d-flex align-items-center mb-2">
+                                    <div style="width: 20px; height: 20px; background: #dc3545; border-radius: 50%; margin-right: 8px;"></div>
+                                    <small>Critical</small>
+                                </div>
+                                <div class="d-flex align-items-center mb-2">
+                                    <div style="width: 20px; height: 20px; background: #fd7e14; border-radius: 50%; margin-right: 8px;"></div>
+                                    <small>High</small>
+                                </div>
+                                <div class="d-flex align-items-center mb-2">
+                                    <div style="width: 20px; height: 20px; background: #ffc107; border-radius: 50%; margin-right: 8px;"></div>
+                                    <small>Medium</small>
+                                </div>
+                                <div class="d-flex align-items-center mb-2">
+                                    <div style="width: 20px; height: 20px; background: #28a745; border-radius: 50%; margin-right: 8px;"></div>
+                                    <small>Low</small>
+                                </div>
+                                <div class="d-flex align-items-center mb-2">
+                                    <div style="width: 20px; height: 20px; background: #6c757d; border-radius: 50%; margin-right: 8px;"></div>
+                                    <small>Unanalyzed</small>
+                                </div>
+                                <hr style="border-color: rgba(255,255,255,0.3);">
+                                <div class="d-flex align-items-center mb-2">
+                                    <div style="width: 20px; height: 20px; background: #17a2b8; border-radius: 3px; margin-right: 8px;"></div>
+                                    <small>Analysis Status</small>
+                                </div>
+                            </div>
+
+                            <!-- SVG Container -->
+                            <svg id="network-svg" width="100%" height="600"></svg>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Node Details Panel -->
+        <div class="row mt-4">
+            <div class="col">
+                <div class="card bg-dark border-secondary">
+                    <div class="card-header">
+                        <h5 class="text-white mb-0">Node Analysis</h5>
+                    </div>
+                    <div class="card-body">
+                        <div id="node-details" class="text-white">
+                            <p class="text-muted">Click on a node to view detailed information</p>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        let simulation, svg, nodes, links, currentLayout = 'force';
+        
+        // Sample network data representing CVE relationships
+        const networkData = {
+            nodes: [
+                {id: "CVE-Hub", type: "hub", size: 40, color: "#667eea", count: 2304},
+                {id: "Critical", type: "priority", size: 20, color: "#dc3545", count: 0},
+                {id: "High", type: "priority", size: 20, color: "#fd7e14", count: 0},
+                {id: "Medium", type: "priority", size: 20, color: "#ffc107", count: 0},
+                {id: "Low", type: "priority", size: 30, color: "#28a745", count: 11},
+                {id: "Unanalyzed", type: "priority", size: 50, color: "#6c757d", count: 2293},
+                {id: "Fixed", type: "status", size: 25, color: "#17a2b8", count: 3},
+                {id: "Rejected", type: "status", size: 25, color: "#ffc107", count: 3},
+                {id: "Not Affected", type: "status", size: 25, color: "#28a745", count: 4},
+                {id: "Tickets", type: "process", size: 35, color: "#6f42c1", count: 473},
+                {id: "Analysis Queue", type: "process", size: 45, color: "#e83e8c", count: 2293},
+                {id: "Security Team", type: "team", size: 25, color: "#20c997", count: 1},
+                {id: "DevOps", type: "team", size: 20, color: "#fd7e14", count: 1}
+            ],
+            links: [
+                {source: "CVE-Hub", target: "Critical", strength: 0},
+                {source: "CVE-Hub", target: "High", strength: 0},
+                {source: "CVE-Hub", target: "Medium", strength: 0},
+                {source: "CVE-Hub", target: "Low", strength: 11},
+                {source: "CVE-Hub", target: "Unanalyzed", strength: 2293},
+                {source: "Low", target: "Fixed", strength: 3},
+                {source: "Low", target: "Rejected", strength: 3},
+                {source: "Low", target: "Not Affected", strength: 4},
+                {source: "CVE-Hub", target: "Tickets", strength: 473},
+                {source: "Unanalyzed", target: "Analysis Queue", strength: 2293},
+                {source: "Security Team", target: "Analysis Queue", strength: 1},
+                {source: "Security Team", target: "Fixed", strength: 1},
+                {source: "DevOps", target: "Fixed", strength: 1},
+                {source: "Tickets", target: "Security Team", strength: 1},
+                {source: "Tickets", target: "DevOps", strength: 1}
+            ]
+        };
+        
+        function initNetwork() {
+            const container = document.querySelector('.network-container');
+            const width = container.offsetWidth;
+            const height = container.offsetHeight;
+            
+            svg = d3.select("#network-svg")
+                .attr("width", width)
+                .attr("height", height);
+            
+            // Clear previous content
+            svg.selectAll("*").remove();
+            
+            // Create tooltip
+            const tooltip = d3.select("body").append("div")
+                .attr("class", "tooltip")
+                .style("opacity", 0);
+            
+            // Initialize simulation
+            simulation = d3.forceSimulation(networkData.nodes)
+                .force("link", d3.forceLink(networkData.links).id(d => d.id).strength(0.5))
+                .force("charge", d3.forceManyBody().strength(-200))
+                .force("center", d3.forceCenter(width / 2, height / 2))
+                .force("collision", d3.forceCollide().radius(d => d.size + 5));
+            
+            // Create links
+            const link = svg.append("g")
+                .selectAll("line")
+                .data(networkData.links)
+                .enter().append("line")
+                .attr("class", d => `link connection-strength-${Math.min(5, Math.max(1, Math.ceil(d.strength / 500)))}`)
+                .style("stroke-width", d => Math.max(1, Math.min(8, d.strength / 300)));
+            
+            // Create nodes
+            const node = svg.append("g")
+                .selectAll("circle")
+                .data(networkData.nodes)
+                .enter().append("circle")
+                .attr("class", "node")
+                .attr("r", d => d.size)
+                .style("fill", d => d.color)
+                .style("stroke", "#fff")
+                .style("stroke-width", 2)
+                .call(drag())
+                .on("click", function(event, d) {
+                    showNodeDetails(d);
+                    // Highlight connected nodes
+                    highlightConnections(d);
+                })
+                .on("mouseover", function(event, d) {
+                    tooltip.transition().duration(200).style("opacity", .9);
+                    tooltip.html(`
+                        <strong>${d.id}</strong><br/>
+                        Type: ${d.type}<br/>
+                        Count: ${d.count}<br/>
+                        ${d.type === 'priority' ? 'Priority Level' : d.type === 'status' ? 'Analysis Status' : 'Node Type'}
+                    `)
+                    .style("left", (event.pageX + 10) + "px")
+                    .style("top", (event.pageY - 28) + "px");
+                })
+                .on("mouseout", function(d) {
+                    tooltip.transition().duration(500).style("opacity", 0);
+                });
+            
+            // Add labels
+            const labels = svg.append("g")
+                .selectAll("text")
+                .data(networkData.nodes)
+                .enter().append("text")
+                .attr("class", "node-label")
+                .text(d => d.count > 0 ? `${d.id} (${d.count})` : d.id)
+                .style("font-size", d => Math.max(10, d.size / 3) + "px");
+            
+            // Update positions on simulation tick
+            simulation.on("tick", () => {
+                link
+                    .attr("x1", d => d.source.x)
+                    .attr("y1", d => d.source.y)
+                    .attr("x2", d => d.target.x)
+                    .attr("y2", d => d.target.y);
+                
+                node
+                    .attr("cx", d => Math.max(d.size, Math.min(width - d.size, d.x)))
+                    .attr("cy", d => Math.max(d.size, Math.min(height - d.size, d.y)));
+                
+                labels
+                    .attr("x", d => d.x)
+                    .attr("y", d => d.y + 5);
+            });
+        }
+        
+        function drag() {
+            return d3.drag()
+                .on("start", function(event, d) {
+                    if (!event.active) simulation.alphaTarget(0.3).restart();
+                    d.fx = d.x;
+                    d.fy = d.y;
+                })
+                .on("drag", function(event, d) {
+                    d.fx = event.x;
+                    d.fy = event.y;
+                })
+                .on("end", function(event, d) {
+                    if (!event.active) simulation.alphaTarget(0);
+                    d.fx = null;
+                    d.fy = null;
+                });
+        }
+        
+        function highlightConnections(selectedNode) {
+            // Reset all nodes and links
+            d3.selectAll(".node").style("opacity", 0.3);
+            d3.selectAll(".link").style("opacity", 0.1);
+            
+            // Highlight selected node
+            d3.selectAll(".node").filter(d => d.id === selectedNode.id).style("opacity", 1);
+            
+            // Highlight connected nodes and links
+            networkData.links.forEach(link => {
+                if (link.source.id === selectedNode.id || link.target.id === selectedNode.id) {
+                    d3.selectAll(".node").filter(d => d.id === link.source.id || d.id === link.target.id).style("opacity", 1);
+                    d3.selectAll(".link").filter(l => l === link).style("opacity", 0.8);
+                }
+            });
+            
+            // Reset after 3 seconds
+            setTimeout(() => {
+                d3.selectAll(".node").style("opacity", 1);
+                d3.selectAll(".link").style("opacity", 0.6);
+            }, 3000);
+        }
+        
+        function showNodeDetails(node) {
+            const detailsPanel = document.getElementById('node-details');
+            
+            let connections = networkData.links.filter(link => 
+                link.source.id === node.id || link.target.id === node.id
+            );
+            
+            detailsPanel.innerHTML = `
+                <div class="row">
+                    <div class="col-md-6">
+                        <h6 class="text-primary">${node.id}</h6>
+                        <p class="mb-1"><strong>Type:</strong> ${node.type}</p>
+                        <p class="mb-1"><strong>Count:</strong> ${node.count}</p>
+                        <p class="mb-1"><strong>Connections:</strong> ${connections.length}</p>
+                    </div>
+                    <div class="col-md-6">
+                        <h6 class="text-secondary">Connected To:</h6>
+                        <ul class="list-unstyled">
+                            ${connections.map(link => {
+                                const connectedNode = link.source.id === node.id ? link.target : link.source;
+                                return `<li class="small">• ${connectedNode.id} (${link.strength})</li>`;
+                            }).join('')}
+                        </ul>
+                    </div>
+                </div>
+            `;
+        }
+        
+        function setLayout(layoutType) {
+            // Update button states
+            document.querySelectorAll('.control-btn').forEach(btn => btn.classList.remove('active'));
+            event.target.classList.add('active');
+            
+            currentLayout = layoutType;
+            
+            const width = document.querySelector('.network-container').offsetWidth;
+            const height = document.querySelector('.network-container').offsetHeight;
+            
+            simulation.stop();
+            
+            if (layoutType === 'circular') {
+                const radius = Math.min(width, height) / 3;
+                const centerX = width / 2;
+                const centerY = height / 2;
+                
+                networkData.nodes.forEach((node, i) => {
+                    const angle = (i / networkData.nodes.length) * 2 * Math.PI;
+                    node.fx = centerX + radius * Math.cos(angle);
+                    node.fy = centerY + radius * Math.sin(angle);
+                });
+            } else if (layoutType === 'hierarchical') {
+                const levels = {
+                    'hub': 0,
+                    'priority': 1,
+                    'status': 2,
+                    'process': 3,
+                    'team': 4
+                };
+                
+                networkData.nodes.forEach((node, i) => {
+                    const level = levels[node.type] || 0;
+                    node.fx = (width / 5) * level + 50;
+                    node.fy = (height / 6) * (i % 6) + 50;
+                });
+            } else {
+                // Force layout - remove fixed positions
+                networkData.nodes.forEach(node => {
+                    node.fx = null;
+                    node.fy = null;
+                });
+            }
+            
+            simulation.alpha(1).restart();
+        }
+        
+        function resetSimulation() {
+            networkData.nodes.forEach(node => {
+                node.fx = null;
+                node.fy = null;
+            });
+            simulation.alpha(1).restart();
+        }
+        
+        // Control panel event listeners
+        document.getElementById('linkStrength').addEventListener('input', function() {
+            simulation.force("link").strength(parseFloat(this.value));
+            simulation.alpha(0.3).restart();
+        });
+        
+        document.getElementById('nodeCharge').addEventListener('input', function() {
+            simulation.force("charge").strength(parseFloat(this.value));
+            simulation.alpha(0.3).restart();
+        });
+        
+        // Initialize the network
+        document.addEventListener('DOMContentLoaded', function() {
+            setTimeout(initNetwork, 100);
+        });
+        
+        // Handle window resize
+        window.addEventListener('resize', function() {
+            setTimeout(initNetwork, 100);
+        });
+    </script>
+</body>
+</html>
